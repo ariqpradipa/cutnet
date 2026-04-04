@@ -21,7 +21,7 @@ fn get_network_info(interface: &NetworkInterface) -> Option<(std::net::Ipv4Addr,
     let ip = interface.ips.iter().find(|ip| ip.is_ipv4())?;
     
     match ip {
-        ipnetwork::IpNetwork::V4(net) => Some((net.ip(), net.prefix())),
+        ipnet::Ipv4Net(ip) => Some((ip.ip(), ip.prefix())),
         _ => None,
     }
 }
@@ -354,7 +354,7 @@ fn to_network_interface(iface: &NetworkInterface) -> Result<crate::network::type
         .ok_or_else(|| NetworkError::MacAddressError("No MAC address".to_string()))?;
 
     let (broadcast, netmask) = match &ip {
-        ipnetwork::IpNetwork::V4(net) => (net.broadcast().to_string(), net.netmask().to_string()),
+        ipnet::Ipv4Net(ip) => (ip.broadcast().to_string(), ip.netmask().to_string()),
         _ => ("255.255.255.255".to_string(), "255.255.255.0".to_string()),
     };
 
