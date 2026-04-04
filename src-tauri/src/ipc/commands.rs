@@ -1,0 +1,555 @@
+//! Tauri command handlers for CutNet IPC
+
+use crate::ipc::events::*;
+use crate::ipc::state::{KillerState, ScannerState};
+use crate::network::{NetworkInterface, NetworkError};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, State};
+
+/// Target device for kill operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceTarget {
+    pub ip: String,
+    pub mac: String,
+}
+
+/// System information response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemInfo {
+    pub platform: String,
+    pub version: String,
+    pub has_admin_privileges: bool,
+    pub hostname: String,
+}
+
+/// Convert NetworkError to a string for Tauri Result
+fn map_error(e: NetworkError) -> String {
+    e.to_string()
+}
+
+/// Get all network interfaces available on the system
+#[tauri::command]
+pub async fn get_interfaces() -> Result<Vec<NetworkInterface>, String> {
+    log::info!("Getting network interfaces");
+    
+    // Get interfaces from system
+    match get_if_addrs::get_if_addrs() {
+        Ok(if_addrs) => {
+            let mut interfaces = Vec::new();
+            
+            for iface in if_addrs {
+                // Skip loopback interfaces
+                if iface.is_loopback() {
+                    continue;
+                }
+                
+                // Only include IPv4 addresses
+                if let get_if_addrs::IfAddr::V4(v4_addr) = iface.addr {
+                    let ip = v4_addr.ip.to_string();
+                    let netmask = v4_addr.netmask.to_string();
+                    let broadcast = v4_addr.broadcast.map(|b| b.to_string()).unwrap_or_else(|| {
+                        // Calculate broadcast from IP and netmask
+                        format!("{}", ip)
+                    });
+                    
+                    // Get MAC address (placeholder - would need platform-specific implementation)
+                    let mac = get_interface_mac(&iface.name).await.unwrap_or_else(|_| "00:00:00:00:00:00".to_string());
+                    
+                    interfaces.push(NetworkInterface::new(
+                        iface.name,
+                        ip,
+                        mac,
+                        broadcast,
+                        netmask,
+                    ));
+                }
+            }
+            
+            log::info!("Found {} network interfaces", interfaces.len());
+            Ok(interfaces)
+        }
+        Err(e) => {
+            log::error!("Failed to get interfaces: {}", e);
+            Err(format!("Failed to get interfaces: {}", e))
+        }
+    }
+}
+
+/// Start ARP scan on the specified interface
+#[tauri::command]
+pub async fn start_arp_scan(
+    interface_name: String,
+    scanner: State<'_, ScannerState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    log::info!("Starting ARP scan on interface: {}", interface_name);
+    
+    let mut scanner_lock = scanner.lock().await;
+    
+    if scanner_lock.is_running() {
+        return Err("Scan already in progress".to_string());
+    }
+    
+    // Start the scan
+    match scanner_lock.start_arp_scan(interface_name, app) {
+        Ok(()) => {
+            log::info!("ARP scan started successfully");
+            Ok(())
+        }
+        Err(e) => {
+            log::error!("Failed to start ARP scan: {}", e);
+            Err(map_error(e))
+        }
+    }
+}
+
+/// Start ping scan on the specified interface
+#[tauri::command]
+pub async fn start_ping_scan(
+    interface_name: String,
+    scanner: State<'_, ScannerState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    log::info!("Starting ping scan on interface: {}", interface_name);
+    
+    let mut scanner_lock = scanner.lock().await;
+    
+    if scanner_lock.is_running() {
+        return Err("Scan already in progress".to_string());
+    }
+    
+    // Start the scan
+    match scanner_lock.start_ping_scan(interface_name, app) {
+        Ok(()) => {
+            log::info!("Ping scan started successfully");
+            Ok(())
+        }
+        Err(e) => {
+            log::error!("Failed to start ping scan: {}", e);
+            Err(map_error(e))
+        }
+    }
+}
+
+/// Stop any active scan
+#[tauri::command]
+pub async fn stop_scan(scanner: State<'_, ScannerState>) -> Result<(), String> {
+    log::info!("Stopping scan");
+    
+    let mut scanner_lock = scanner.lock().await;
+    scanner_lock.stop_scan();
+    
+    log::info!("Scan stopped");
+    Ok(())
+}
+
+/// Kill (block internet access for) a specific device
+#[tauri::command]
+pub async fn kill_device(
+    ip: String,
+    mac: String,
+    killer: State<'_, KillerState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    log::info!("Killing device: {} ({})", ip, mac);
+    
+    let mut killer_lock = killer.lock().await;
+    
+    match killer_lock.kill_device(ip.clone(), mac.clone()) {
+        Ok(()) => {
+            emit_device_killed(&app, ip, mac);
+            log::info!("Device killed successfully");
+            Ok(())
+        }
+        Err(e) => {
+            log::error!("Failed to kill device: {}", e);
+            Err(map_error(e))
+        }
+    }
+}
+
+/// Restore internet access for a specific device
+#[tauri::command]
+pub async fn unkill_device(
+    ip: String,
+    mac: String,
+    killer: State<'_, KillerState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    log::info!("Restoring device: {} ({})", ip, mac);
+    
+    let mut killer_lock = killer.lock().await;
+    
+    match killer_lock.unkill_device(ip.clone(), mac.clone()) {
+        Ok(()) => {
+            emit_device_restored(&app, ip, mac);
+            log::info!("Device restored successfully");
+            Ok(())
+        }
+        Err(e) => {
+            log::error!("Failed to restore device: {}", e);
+            Err(map_error(e))
+        }
+    }
+}
+
+/// Kill multiple devices at once
+#[tauri::command]
+pub async fn kill_all_devices(
+    devices: Vec<DeviceTarget>,
+    killer: State<'_, KillerState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    log::info!("Killing {} devices", devices.len());
+    
+    let mut killer_lock = killer.lock().await;
+    
+    for device in devices {
+        match killer_lock.kill_device(device.ip.clone(), device.mac.clone()) {
+            Ok(()) => {
+                emit_device_killed(&app, device.ip, device.mac);
+            }
+            Err(e) => {
+                log::error!("Failed to kill device {}: {}", device.ip, e);
+                // Continue with other devices even if one fails
+            }
+        }
+    }
+    
+    log::info!("Batch kill operation completed");
+    Ok(())
+}
+
+/// Restore all killed devices
+#[tauri::command]
+pub async fn unkill_all_devices(
+    killer: State<'_, KillerState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    log::info!("Restoring all devices");
+    
+    let mut killer_lock = killer.lock().await;
+    
+    match killer_lock.unkill_all() {
+        Ok(devices) => {
+            for (ip, mac) in devices {
+                emit_device_restored(&app, ip, mac);
+            }
+            log::info!("All devices restored successfully");
+            Ok(())
+        }
+        Err(e) => {
+            log::error!("Failed to restore all devices: {}", e);
+            Err(map_error(e))
+        }
+    }
+}
+
+/// Get MAC address for a network interface
+#[tauri::command]
+pub async fn get_mac_address(interface: String) -> Result<String, String> {
+    log::info!("Getting MAC address for interface: {}", interface);
+    
+    get_interface_mac(&interface).await
+}
+
+/// Set MAC address for a network interface
+#[tauri::command]
+pub async fn set_mac_address(
+    interface: String,
+    new_mac: String,
+    app: AppHandle,
+) -> Result<(), String> {
+    log::info!("Setting MAC address for {} to {}", interface, new_mac);
+    
+    // Validate MAC address format
+    if !is_valid_mac(&new_mac) {
+        return Err("Invalid MAC address format".to_string());
+    }
+    
+    // Platform-specific implementation would go here
+    #[cfg(target_os = "linux")]
+    {
+        // Linux implementation
+        match set_mac_linux(&interface, &new_mac).await {
+            Ok(()) => {
+                emit_mac_address_changed(&app, interface, new_mac);
+                log::info!("MAC address set successfully");
+                Ok(())
+            }
+            Err(e) => {
+                log::error!("Failed to set MAC address: {}", e);
+                Err(e)
+            }
+        }
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        // macOS implementation
+        match set_mac_macos(&interface, &new_mac).await {
+            Ok(()) => {
+                emit_mac_address_changed(&app, interface, new_mac);
+                log::info!("MAC address set successfully");
+                Ok(())
+            }
+            Err(e) => {
+                log::error!("Failed to set MAC address: {}", e);
+                Err(e)
+            }
+        }
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        // Windows implementation
+        match set_mac_windows(&interface, &new_mac).await {
+            Ok(()) => {
+                emit_mac_address_changed(&app, interface, new_mac);
+                log::info!("MAC address set successfully");
+                Ok(())
+            }
+            Err(e) => {
+                log::error!("Failed to set MAC address: {}", e);
+                Err(e)
+            }
+        }
+    }
+}
+
+/// Clone MAC address from one interface to another
+#[tauri::command]
+pub async fn clone_mac_address(from: String, to: String, app: AppHandle) -> Result<(), String> {
+    log::info!("Cloning MAC from {} to {}", from, to);
+    
+    // Get MAC from source interface
+    let source_mac = match get_interface_mac(&from).await {
+        Ok(mac) => mac,
+        Err(e) => return Err(format!("Failed to get source MAC: {}", e)),
+    };
+    
+    // Set it on target interface
+    set_mac_address(to, source_mac, app).await
+}
+
+/// Check if the application has administrative privileges
+#[tauri::command]
+pub async fn check_admin_privileges() -> Result<bool, String> {
+    log::info!("Checking admin privileges");
+    
+    #[cfg(target_os = "linux")]
+    {
+        // Check if running as root or have CAP_NET_ADMIN
+        let uid = unsafe { libc::getuid() };
+        Ok(uid == 0)
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        // Check if running as root
+        let uid = unsafe { libc::getuid() };
+        Ok(uid == 0)
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        // Check if running as administrator
+        match is_windows_admin() {
+            Ok(is_admin) => Ok(is_admin),
+            Err(e) => {
+                log::error!("Failed to check admin privileges: {}", e);
+                Err(format!("Failed to check privileges: {}", e))
+            }
+        }
+    }
+    
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        Err("Platform not supported".to_string())
+    }
+}
+
+/// Get system information
+#[tauri::command]
+pub async fn get_system_info() -> Result<SystemInfo, String> {
+    log::info!("Getting system info");
+    
+    let platform = std::env::consts::OS.to_string();
+    let version = get_os_version().await?;
+    let has_admin_privileges = check_admin_privileges().await.unwrap_or(false);
+    let hostname = hostname::get()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+    
+    Ok(SystemInfo {
+        platform,
+        version,
+        has_admin_privileges,
+        hostname,
+    })
+}
+
+/// Helper function to get MAC address for an interface
+async fn get_interface_mac(_interface: &str) -> Result<String, String> {
+    match mac_address::get_mac_address() {
+        Ok(Some(mac)) => Ok(mac.to_string()),
+        Ok(None) => Err("MAC address not found".to_string()),
+        Err(e) => Err(format!("Failed to get MAC: {}", e)),
+    }
+}
+
+/// Validate MAC address format
+fn is_valid_mac(mac: &str) -> bool {
+    let mac_regex = regex::Regex::new(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$").unwrap();
+    mac_regex.is_match(mac)
+}
+
+/// Platform-specific implementations
+#[cfg(target_os = "linux")]
+async fn set_mac_linux(interface: &str, mac: &str) -> Result<(), String> {
+    use std::process::Command;
+    
+    // Bring interface down
+    let down = Command::new("ip")
+        .args(&["link", "set", "dev", interface, "down"])
+        .output();
+    
+    if let Err(e) = down {
+        return Err(format!("Failed to bring interface down: {}", e));
+    }
+    
+    // Set MAC address
+    let set = Command::new("ip")
+        .args(&["link", "set", "dev", interface, "address", mac])
+        .output();
+    
+    if let Err(e) = set {
+        // Try to bring interface back up even if setting MAC failed
+        let _ = Command::new("ip")
+            .args(&["link", "set", "dev", interface, "up"])
+            .output();
+        return Err(format!("Failed to set MAC: {}", e));
+    }
+    
+    // Bring interface up
+    let up = Command::new("ip")
+        .args(&["link", "set", "dev", interface, "up"])
+        .output();
+    
+    if let Err(e) = up {
+        return Err(format!("Failed to bring interface up: {}", e));
+    }
+    
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+async fn set_mac_macos(interface: &str, mac: &str) -> Result<(), String> {
+    use std::process::Command;
+    
+    // macOS requires sudo and uses ifconfig
+    let output = Command::new("ifconfig")
+        .args(&[interface, "ether", mac])
+        .output();
+    
+    match output {
+        Ok(result) => {
+            if result.status.success() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "ifconfig failed: {}",
+                    String::from_utf8_lossy(&result.stderr)
+                ))
+            }
+        }
+        Err(e) => Err(format!("Failed to execute ifconfig: {}", e)),
+    }
+}
+
+#[cfg(target_os = "windows")]
+async fn set_mac_windows(interface: &str, mac: &str) -> Result<(), String> {
+    use std::process::Command;
+    
+    // Windows requires registry modification and adapter reset
+    // This is a simplified version - real implementation would need WMI
+    Err("Windows MAC spoofing not yet implemented".to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn is_windows_admin() -> Result<bool, String> {
+    use winapi::um::securitybaseapi::GetTokenInformation;
+    use winapi::um::winnt::{TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    use winapi::um::processthreadsapi::GetCurrentProcess;
+    use winapi::um::handleapi::CloseHandle;
+    use winapi::um::processthreadsapi::OpenProcessToken;
+    
+    unsafe {
+        let mut token = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return Err("Failed to open process token".to_string());
+        }
+        
+        let mut elevation: TOKEN_ELEVATION = std::mem::zeroed();
+        let mut size = std::mem::size_of::<TOKEN_ELEVATION>() as u32;
+        
+        let result = GetTokenInformation(
+            token,
+            TokenElevation,
+            &mut elevation as *mut _ as *mut _,
+            size,
+            &mut size,
+        );
+        
+        CloseHandle(token);
+        
+        if result == 0 {
+            return Err("Failed to get token information".to_string());
+        }
+        
+        Ok(elevation.TokenIsElevated != 0)
+    }
+}
+
+/// Get OS version
+async fn get_os_version() -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    {
+        match std::fs::read_to_string("/etc/os-release") {
+            Ok(content) => {
+                for line in content.lines() {
+                    if line.starts_with("PRETTY_NAME=") {
+                        return Ok(line.trim_start_matches("PRETTY_NAME=").trim_matches('"').to_string());
+                    }
+                }
+                Ok("Linux".to_string())
+            }
+            Err(_) => Ok("Linux".to_string()),
+        }
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        match Command::new("sw_vers").arg("-productVersion").output() {
+            Ok(output) => {
+                if output.status.success() {
+                    Ok(format!("macOS {}", String::from_utf8_lossy(&output.stdout).trim()))
+                } else {
+                    Ok("macOS".to_string())
+                }
+            }
+            Err(_) => Ok("macOS".to_string()),
+        }
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        Ok(format!("Windows {}", sysinfo::System::kernel_version().unwrap_or_else(|| "Unknown".to_string())))
+    }
+    
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        Ok("Unknown".to_string())
+    }
+}
