@@ -17,12 +17,12 @@ const ARP_TIMEOUT_MS: u64 = 2000;
 const PING_TIMEOUT_SECS: u64 = 2;
 const SCAN_CONCURRENCY: usize = 50;
 
-fn get_network_info(interface: &NetworkInterface) -> Option<(std::net::Ipv4Addr, u8)> {
+fn get_network_info(interface: &pnet_datalink::NetworkInterface) -> Option<(std::net::Ipv4Addr, u8)> {
     let ip = interface.ips.iter().find(|ip| ip.is_ipv4())?;
-    
-    match ip {
-        ipnet::Ipv4Net(ip) => Some((ip.ip(), ip.prefix())),
-        _ => None,
+    if let std::net::IpAddr::V4(addr) = ip.ip() {
+        Some((addr, ip.prefix()))
+    } else {
+        None
     }
 }
 
@@ -352,15 +352,39 @@ fn to_network_interface(iface: &NetworkInterface) -> Result<crate::network::type
     let mac = iface
         .mac
         .ok_or_else(|| NetworkError::MacAddressError("No MAC address".to_string()))?;
-
-    let (broadcast, netmask) = match &ip {
-        ipnet::Ipv4Net(ip) => (ip.broadcast().to_string(), ip.netmask().to_string()),
-        _ => ("255.255.255.255".to_string(), "255.255.255.0".to_string()),
+    
+    let (broadcast, netmask, ip_addr, prefix) = {
+        let addr = if let std::net::IpAddr::V4(addr) = ip.ip() {
+            addr
+        } else {
+            return Err(NetworkError::InvalidIpAddress("Not IPv4".into()));
+        };
+        let prefix = ip.prefix();
+        
+        let mask = !((1u32 << (32 - prefix)) - 1);
+        let netmask_octets = mask.to_ne_bytes();
+        let netmask = std::net::Ipv4Addr::from(netmask_octets);
+        
+        let network_addr: [u8; 4] = addr.octets().iter()
+            .zip(netmask_octets.iter())
+            .map(|(&ip_byte, &mask_byte)| ip_byte & mask_byte)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        let broadcast_octets: [u8; 4] = network_addr.iter()
+            .zip(netmask_octets.iter())
+            .map(|(&net_byte, &mask_byte)| net_byte | !mask_byte)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        let broadcast = std::net::Ipv4Addr::from(broadcast_octets);
+        
+        (broadcast.to_string(), netmask.to_string(), addr, prefix)
     };
 
     Ok(crate::network::types::NetworkInterface::new(
         iface.name.clone(),
-        ip.ip().to_string(),
+        ip_addr.to_string(),
         format_mac(&mac.octets()),
         broadcast,
         netmask,
