@@ -165,20 +165,19 @@ async fn poison_target(
     let target_mac = parse_mac_bytes(&target.mac)?;
     let target_ip = target
         .ip
-        .parse()
+        .parse::<std::net::Ipv4Addr>()
         .map_err(|_| NetworkError::InvalidIpAddress(target.ip.clone()))?;
     let router_ip = router
         .ip
-        .parse()
+        .parse::<std::net::Ipv4Addr>()
         .map_err(|_| NetworkError::InvalidIpAddress(router.ip.clone()))?;
 
     let packet = build_arp_reply(
         interface,
         my_mac,
         target_mac,
-        router_ip,
-        my_mac,
         target_ip,
+        my_mac,
         router_ip,
     )?;
 
@@ -340,7 +339,7 @@ pub async fn poison_once(
     )?;
 
     tx.send_to(&packet, Some(interface.clone()))
-        .map_err(|e| NetworkError::PacketSendError(format!("{:?}", e)))?;
+        .ok_or_else(|| NetworkError::PacketSendError("Failed to send ARP reply".into()))?;
 
     Ok(())
 }

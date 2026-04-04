@@ -21,7 +21,7 @@ fn get_network_info(interface: &NetworkInterface) -> Option<(std::net::Ipv4Addr,
     let ip = interface.ips.iter().find(|ip| ip.is_ipv4())?;
     
     match ip {
-        ipnet::IpNet::V4(net) => Some((net.addr(), net.prefix_len())),
+        ipnetwork::IpNetwork::V4(net) => Some((net.ip(), net.prefix())),
         _ => None,
     }
 }
@@ -156,8 +156,9 @@ async fn send_arp_requests(
         if let Ok(target_ip) = target_ip_str.parse::<std::net::Ipv4Addr>() {
             let packet = build_arp_request(interface, source_ip, source_mac, target_ip);
 
-            if let Err(e) = tx.send_to(&packet, Some(interface.clone())) {
-                log::warn!("Failed to send ARP request to {}: {:?}", target_ip, e);
+            let result = tx.send_to(&packet, Some(interface.clone()));
+            if result.is_none() {
+                log::warn!("Failed to send ARP request to {}", target_ip);
             }
 
             tokio::time::sleep(Duration::from_millis(5)).await;
@@ -345,18 +346,21 @@ fn to_network_interface(iface: &NetworkInterface) -> Result<crate::network::type
         .find(|ip| ip.is_ipv4())
         .ok_or_else(|| NetworkError::InterfaceNotFound("No IPv4 address".to_string()))?;
 
+    let ip = iface.ips.iter().find(|ip| ip.is_ipv4()).ok_or_else(|| {
+        NetworkError::MacAddressError("No IPv4 address found".to_string())
+    })?;
     let mac = iface
         .mac
         .ok_or_else(|| NetworkError::MacAddressError("No MAC address".to_string()))?;
 
-    let (broadcast, netmask) = match ip {
-        ipnet::IpNet::V4(net) => (net.broadcast().to_string(), net.netmask().to_string()),
+    let (broadcast, netmask) = match &ip {
+        ipnetwork::IpNetwork::V4(net) => (net.broadcast().to_string(), net.netmask().to_string()),
         _ => ("255.255.255.255".to_string(), "255.255.255.0".to_string()),
     };
 
     Ok(crate::network::types::NetworkInterface::new(
         iface.name.clone(),
-        ip.addr().to_string(),
+        ip.ip().to_string(),
         format_mac(&mac.octets()),
         broadcast,
         netmask,
