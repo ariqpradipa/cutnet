@@ -13,6 +13,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
 import { Trash2, Clock } from "lucide-react"
 
 interface HistoryEntry {
@@ -41,6 +49,7 @@ function formatDuration(joinedAt: number, leftAt: number): string {
 export function HistoryPanel() {
   const [entries, setEntries] = useState<HistoryEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
 
   const loadHistory = useCallback(async () => {
     try {
@@ -57,7 +66,13 @@ export function HistoryPanel() {
     loadHistory()
   }, [loadHistory])
 
-  const handleClear = useCallback(async () => {
+  const handleClear = useCallback(() => {
+    if (entries.length === 0) return;
+    setShowClearConfirm(true);
+  }, [entries.length])
+
+  const confirmClear = useCallback(async () => {
+    setShowClearConfirm(false);
     try {
       await clearHistory()
       setEntries([])
@@ -148,6 +163,25 @@ export function HistoryPanel() {
           </TableBody>
         </Table>
       </ScrollArea>
+
+      <Dialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clear history?</DialogTitle>
+            <DialogDescription>
+              This will permanently delete all {entries.length} recorded event{entries.length !== 1 ? "s" : ""}.
+              This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowClearConfirm(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={confirmClear}>
+              <Trash2 data-icon="inline-start" />
+              Clear History
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

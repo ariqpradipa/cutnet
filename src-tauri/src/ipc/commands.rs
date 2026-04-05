@@ -540,3 +540,48 @@ pub async fn set_device_custom_name(ip: String, name: String) -> Result<(), Stri
 pub async fn get_custom_device_names() -> Result<std::collections::HashMap<String, String>, String> {
     Ok(crate::network::device_names::get_all_names().await)
 }
+
+/// Set bandwidth limit for a device
+#[tauri::command]
+pub async fn set_bandwidth_limit(
+    mac: String,
+    download_kbps: Option<u32>,
+    upload_kbps: Option<u32>,
+) -> Result<(), String> {
+    log::info!("Setting bandwidth limit for MAC {}: download={:?}, upload={:?}", mac, download_kbps, upload_kbps);
+
+    crate::network::add_limit_and_persist(&mac, download_kbps, upload_kbps)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Remove bandwidth limit for a device
+#[tauri::command]
+pub async fn remove_bandwidth_limit(mac: String) -> Result<(), String> {
+    log::info!("Removing bandwidth limit for MAC {}", mac);
+
+    crate::network::remove_limit_and_persist(&mac)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Get all bandwidth limits
+#[tauri::command]
+pub async fn get_bandwidth_limits() -> Result<Vec<crate::network::bandwidth::BandwidthLimit>, String> {
+    let controller = crate::network::get_bandwidth_controller();
+
+    if let Some(ctrl) = controller {
+        Ok(ctrl.get_limits().await)
+    } else {
+        Ok(crate::network::get_persisted_limits().await.unwrap_or_default())
+    }
+}
+
+/// Get bandwidth statistics for a device
+#[tauri::command]
+pub async fn get_bandwidth_stats(mac: String) -> Result<crate::network::bandwidth::BandwidthStats, String> {
+    let controller = crate::network::get_bandwidth_controller()
+        .ok_or("Bandwidth controller not initialized")?;
+
+    controller.get_stats(&mac).await.map_err(|e| e.to_string())
+}

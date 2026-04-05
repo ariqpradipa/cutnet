@@ -148,6 +148,7 @@ export function DeviceTable() {
   const [customNames, setCustomNames] = useState<Record<string, string>>({})
   const [editingName, setEditingName] = useState<string | null>(null)
   const [editingValue, setEditingValue] = useState("")
+  const [showKillAllConfirm, setShowKillAllConfirm] = useState(false)
 
   useEffect(() => {
     const loadNames = async () => {
@@ -287,7 +288,12 @@ export function DeviceTable() {
       toast({ title: "No devices to kill", description: "All devices are already killed or this is your machine.", variant: "default" });
       return;
     }
+    setShowKillAllConfirm(true);
+  }, [devices, killStates]);
 
+  const confirmKillAll = useCallback(async () => {
+    setShowKillAllConfirm(false);
+    const killableDevices = devices.filter(d => !killStates.get(d.mac)?.is_killed && !d.is_me);
     try {
       await killAllDevices(killableDevices);
       for (const device of killableDevices) {
@@ -366,6 +372,7 @@ export function DeviceTable() {
   const allSelected = devices.length > 0 && selectedRows.size === devices.length
   const someSelected = selectedRows.size > 0 && selectedRows.size < devices.length
   const killedCount = devices.filter(d => killStates.get(d.mac)?.is_killed).length;
+  const killableCount = devices.filter(d => !killStates.get(d.mac)?.is_killed && !d.is_me).length;
 
   const startEditingName = useCallback((device: Device) => {
     setEditingName(device.ip)
@@ -922,6 +929,25 @@ export function DeviceTable() {
               </DialogFooter>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showKillAllConfirm} onOpenChange={setShowKillAllConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Block {killableCount} device{killableCount !== 1 ? "s" : ""}?</DialogTitle>
+            <DialogDescription>
+              This will block internet access for all non-whitelisted devices on your network.
+              This action can be reversed.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowKillAllConfirm(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={confirmKillAll}>
+              <PowerOff data-icon="inline-start" />
+              Block All
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </TooltipProvider>
