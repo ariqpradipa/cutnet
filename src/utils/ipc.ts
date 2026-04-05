@@ -59,7 +59,7 @@ export async function cloneMacAddress(
   fromInterface: string,
   toInterface: string
 ): Promise<void> {
-  await invoke("clone_mac_address", { fromInterface, toInterface });
+  await invoke("clone_mac_address", { from: fromInterface, to: toInterface });
 }
 
 export interface DeviceUpdateEvent {

@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useEffect } from "react"
 import { useDeviceStore } from "@/stores/deviceStore"
 import { useNetworkStore } from "@/stores/networkStore"
-import { killDevice, unkillDevice, killAllDevices, unkillAllDevices, setDeviceCustomName, getCustomDeviceNames } from "@/utils/ipc"
+import { killDevice, unkillDevice, killAllDevices, unkillAllDevices, setDeviceCustomName, getCustomDeviceNames, addWhitelistEntry } from "@/utils/ipc"
 import type { Device, KillState } from "@/lib/schemas"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -51,9 +51,46 @@ import {
   Search,
   Pencil,
   Gauge,
+  Smartphone,
+  Laptop,
+  Gamepad2,
+  Server,
+  Tv,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/useToast"
+
+function getDeviceIcon(vendor: string | null, hostname: string | null) {
+  const vendorLower = (vendor || "").toLowerCase();
+  const hostnameLower = (hostname || "").toLowerCase();
+  
+  if (["cisco", "netgear", "tp-link", "asus", "d-link", "linksys", "ubiquiti", "mikrotik", "router", "gateway"].some(v => vendorLower.includes(v))) {
+    return Router;
+  }
+  if (vendorLower.includes("apple") || hostnameLower.includes("iphone") || hostnameLower.includes("ipad") || hostnameLower.includes("mac")) {
+    if (hostnameLower.includes("iphone")) return Smartphone;
+    if (hostnameLower.includes("ipad")) return Laptop;
+    return Laptop;
+  }
+  if (vendorLower.includes("samsung") || hostnameLower.includes("samsung")) {
+    return Smartphone;
+  }
+  if (vendorLower.includes("microsoft") && hostnameLower.includes("xbox") || 
+      vendorLower.includes("sony") && hostnameLower.includes("playstation") ||
+      vendorLower.includes("nintendo") || hostnameLower.includes("switch")) {
+    return Gamepad2;
+  }
+  if (vendorLower.includes("lg") || (vendorLower.includes("samsung") && hostnameLower.includes("tv")) ||
+      hostnameLower.includes("roku") || hostnameLower.includes("fire") || hostnameLower.includes("chromecast")) {
+    return Tv;
+  }
+  if (vendorLower.includes("dell") || vendorLower.includes("hp") || vendorLower.includes("lenovo") || 
+      hostnameLower.includes("server") || hostnameLower.includes("nas")) {
+    return Server;
+  }
+  
+  return Monitor;
+}
 
 type SortField = "status" | "ip" | "mac" | "vendor" | "hostname" | "actions"
 type SortDirection = "asc" | "desc"
@@ -656,6 +693,10 @@ export function DeviceTable() {
                               startEditingName(device)
                             }}
                           >
+                            {(() => {
+                              const DeviceIcon = getDeviceIcon(device.vendor, displayName);
+                              return <DeviceIcon className="size-3 text-muted-foreground shrink-0" />;
+                            })()}
                             <span className="truncate max-w-[120px]">
                               {displayName}
                             </span>
@@ -839,11 +880,20 @@ export function DeviceTable() {
                 </DialogClose>
                 <Button
                   variant="outline"
-                  onClick={() => {
-                    toast({
-                      title: "Whitelist",
-                      description: `${selectedDevice.mac} added to whitelist`,
-                    });
+                  onClick={async () => {
+                    try {
+                      await addWhitelistEntry(selectedDevice.mac);
+                      toast({
+                        title: "Whitelist",
+                        description: `${selectedDevice.mac} added to whitelist`,
+                      });
+                    } catch (err) {
+                      toast({
+                        title: "Whitelist failed",
+                        description: err instanceof Error ? err.message : "Unknown error",
+                        variant: "destructive",
+                      });
+                    }
                     setShowDetailDialog(false);
                   }}
                 >

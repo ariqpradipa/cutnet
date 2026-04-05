@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -6,14 +6,35 @@ import { DeviceTable } from "@/components/DeviceTable";
 import { ScanControls } from "@/components/ScanControls";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { HistoryPanel } from "@/components/HistoryPanel";
-import { Shield, Users, Settings, Clock } from "lucide-react";
+import { Shield, Users, Settings, Clock, Moon, Sun } from "lucide-react";
 import { useNetworkStore } from "@/stores/networkStore";
 import { ToastContainer } from "@/components/ToastContainer";
+import { useTauriEvents } from "@/hooks/useTauriEvents";
 import "./App.css";
 
 function App() {
   const [activeTab, setActiveTab] = useState("devices");
   const { isRunning, isScanning } = useNetworkStore();
+  const [isDark, setIsDark] = useState(false);
+
+  // Set up all Tauri IPC event listeners
+  useTauriEvents();
+
+  // Initialize dark mode from localStorage or system preference
+  useEffect(() => {
+    const stored = localStorage.getItem("cutnet-dark-mode");
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const initialDark = stored === "true" || (stored === null && prefersDark);
+    setIsDark(initialDark);
+    document.documentElement.classList.toggle("dark", initialDark);
+  }, []);
+
+  const toggleDarkMode = () => {
+    const newDark = !isDark;
+    setIsDark(newDark);
+    document.documentElement.classList.toggle("dark", newDark);
+    localStorage.setItem("cutnet-dark-mode", newDark ? "true" : "false");
+  };
 
   return (
     <TooltipProvider>
@@ -27,6 +48,13 @@ function App() {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={toggleDarkMode}
+                className="p-2 rounded-full hover:bg-accent transition-colors"
+                aria-label="Toggle dark mode"
+              >
+                {isDark ? <Sun className="size-5" /> : <Moon className="size-5" />}
+              </button>
               {isScanning && (
                 <Badge variant="default" className="animate-pulse">
                   Scanning

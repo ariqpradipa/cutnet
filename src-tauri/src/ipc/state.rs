@@ -6,6 +6,8 @@
 use crate::ipc::events::{emit_device_found, emit_scan_progress, emit_scan_completed};
 use crate::network::{Device, NetworkError};
 use crate::network::poisoner::{start_poisoning, stop_poisoning};
+use crate::network::whitelist::{is_whitelisted, is_protected};
+use crate::network::history;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::AppHandle;
@@ -51,6 +53,13 @@ impl Killer {
                 "Device {} is already being poisoned",
                 ip
             )));
+        }
+
+        // Check whitelist - if device is whitelisted and protection is enabled, reject the kill
+        if is_whitelisted(&mac).await && is_protected(&mac).await {
+            return Err(NetworkError::PoisoningError(
+                format!("Device {} ({}) is whitelisted and protected", mac, ip)
+            ));
         }
 
         let interface_name = self.interface_name.clone().ok_or_else(|| {
@@ -168,6 +177,8 @@ pub struct Scanner {
     should_stop: bool,
     /// AppHandle for emitting events from background tasks
     app: Option<AppHandle>,
+    /// Track known devices (by IP) to detect joins/leaves for history
+    known_devices: HashMap<String, Device>,
 }
 
 impl Scanner {
@@ -180,6 +191,7 @@ impl Scanner {
             progress: 0,
             should_stop: false,
             app: None,
+            known_devices: HashMap::new(),
         }
     }
 
@@ -212,8 +224,39 @@ impl Scanner {
             match &result {
                 Ok(devices) => {
                     let total = devices.len() as u16;
+                    let mut current_ips = HashMap::new();
+                    for device in devices {
+                        current_ips.insert(device.ip.clone(), device);
+                    }
+                    
+                    let known_ips: Vec<String> = {
+                        let scanner = self_arc.lock().await;
+                        scanner.known_devices.keys().cloned().collect()
+                    };
+                    for ip in known_ips {
+                        if !current_ips.contains_key(&ip) {
+                            history::log_device_left(&ip).await;
+                            let mut scanner = self_arc.lock().await;
+                            scanner.known_devices.remove(&ip);
+                        }
+                    }
+                    
                     for (i, device) in devices.iter().enumerate() {
+                        let is_new = {
+                            let mut scanner = self_arc.lock().await;
+                            let is_new = !scanner.known_devices.contains_key(&device.ip);
+                            if is_new {
+                                scanner.known_devices.insert(device.ip.clone(), device.clone());
+                            }
+                            is_new
+                        };
+                        
                         emit_device_found(&app, device.clone());
+                        
+                        if is_new {
+                            history::log_device_joined(device).await;
+                        }
+                        
                         let progress = if total > 0 {
                             ((i as f32 / total as f32) * 100.0) as u8
                         } else {
@@ -263,8 +306,39 @@ impl Scanner {
             match &result {
                 Ok(devices) => {
                     let total = devices.len() as u16;
+                    let mut current_ips = HashMap::new();
+                    for device in devices {
+                        current_ips.insert(device.ip.clone(), device);
+                    }
+                    
+                    let known_ips: Vec<String> = {
+                        let scanner = self_arc.lock().await;
+                        scanner.known_devices.keys().cloned().collect()
+                    };
+                    for ip in known_ips {
+                        if !current_ips.contains_key(&ip) {
+                            history::log_device_left(&ip).await;
+                            let mut scanner = self_arc.lock().await;
+                            scanner.known_devices.remove(&ip);
+                        }
+                    }
+                    
                     for (i, device) in devices.iter().enumerate() {
+                        let is_new = {
+                            let mut scanner = self_arc.lock().await;
+                            let is_new = !scanner.known_devices.contains_key(&device.ip);
+                            if is_new {
+                                scanner.known_devices.insert(device.ip.clone(), device.clone());
+                            }
+                            is_new
+                        };
+                        
                         emit_device_found(&app, device.clone());
+                        
+                        if is_new {
+                            history::log_device_joined(device).await;
+                        }
+                        
                         let progress = if total > 0 {
                             ((i as f32 / total as f32) * 100.0) as u8
                         } else {
