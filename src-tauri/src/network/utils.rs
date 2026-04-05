@@ -1100,23 +1100,10 @@ fn normalize_mac_prefix(mac: &str) -> String {
 }
 
 pub fn get_hostname(ip: &str) -> Option<String> {
-    use std::net::ToSocketAddrs;
-
-    let addr = format!("{}:0", ip);
-    match addr.to_socket_addrs() {
-        Ok(addrs) => {
-            for a in addrs {
-                if let Ok(ip) = a.ip().to_string().parse::<IpAddr>() {
-                    log::debug!("Resolved IP: {:?}", ip);
-                }
-            }
-            None
-        }
-        Err(e) => {
-            log::debug!("Failed to resolve hostname for {}: {}", ip, e);
-            None
-        }
-    }
+    let addr: std::net::IpAddr = ip.parse().ok()?;
+    dns_lookup::lookup_addr(&addr)
+        .ok()
+        .filter(|h| !h.is_empty())
 }
 
 pub fn is_valid_mac(mac: &str) -> bool {

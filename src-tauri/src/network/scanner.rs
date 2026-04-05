@@ -63,11 +63,12 @@ pub async fn arp_scan(interface_name: &str) -> Result<Vec<Device>> {
         send_arp_requests(&mut tx, &interface, source_ip, my_mac.octets(), &ip_range).await;
     });
 
-    tokio::time::sleep(Duration::from_millis(ARP_TIMEOUT_MS)).await;
-
-    recv_task.abort();
-    let _ = recv_task.await;
-    let _ = send_task.await;
+    let _ = tokio::time::timeout(
+        Duration::from_millis(ARP_TIMEOUT_MS),
+        async {
+            let _ = tokio::join!(recv_task, send_task);
+        }
+    ).await;
 
     let devices = discovered.lock().await.values().cloned().collect();
     Ok(devices)
@@ -218,23 +219,29 @@ pub async fn ping_scan(interface_name: &str) -> Result<Vec<Device>> {
     let ip_range = generate_network_range(&network_prefix, &netmask);
 
     let mut join_set = JoinSet::new();
+    let mut responded_ips: Vec<String> = Vec::new();
 
     for ip in ip_range {
+        let ip_clone = ip.clone();
         join_set.spawn(async move {
-            if ping_host(&ip).await {
-                Some(ip)
+            if ping_host(&ip_clone).await {
+                Some(ip_clone)
             } else {
                 None
             }
         });
 
         if join_set.len() >= SCAN_CONCURRENCY {
-            if let Some(Ok(_)) = join_set.join_next().await {}
+            if let Some(Ok(Some(ip))) = join_set.join_next().await {
+                responded_ips.push(ip);
+            }
         }
     }
 
     while let Some(result) = join_set.join_next().await {
-        let _ = result;
+        if let Ok(Some(ip)) = result {
+            responded_ips.push(ip);
+        }
     }
 
     let arp_table = read_arp_table().await?;
