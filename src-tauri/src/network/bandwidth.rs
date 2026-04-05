@@ -592,7 +592,7 @@ impl BandwidthController {
         // Append rule to pf anchors
         let anchor_name = format!("cutnet_{}", mac.replace(':', ""));
 
-        let output = Command::new("pfctl")
+        let mut output = Command::new("pfctl")
             .args([
                 "-a", &anchor_name,
                 "-f", "-",
@@ -603,7 +603,7 @@ impl BandwidthController {
             .spawn()
             .map_err(|e| BandwidthError::CommandFailed(e.to_string()))?;
 
-        if let Some(mut stdin) = output.stdin {
+        if let Some(ref mut stdin) = output.stdin {
             use std::io::Write;
             let _ = stdin.write_all(rule.as_bytes());
         }

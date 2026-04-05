@@ -50,6 +50,7 @@ import {
   ShieldOff,
 } from "lucide-react";
 import { useNetworkStore } from "@/stores/networkStore";
+import { checkForUpdates } from "@/lib/updateChecker";
 import {
   setMacAddress as ipcSetMacAddress,
   flushArpCache as ipcFlushArpCache,
@@ -386,15 +387,28 @@ export function SettingsPanel({ className, defaultTab = "network" }: SettingsPan
   }, []);
 
   // Handle check for updates
+  const [updateError, setUpdateError] = useState<string | null>(null);
+
   const handleCheckUpdates = useCallback(async () => {
     setIsCheckingUpdates(true);
     setUpdateStatus(null);
+    setUpdateError(null);
 
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-
-    setUpdateStatus({ available: false });
-    setIsCheckingUpdates(false);
+    try {
+      const result = await checkForUpdates();
+      if (result.error) {
+        setUpdateError(result.error);
+      } else {
+        setUpdateStatus({
+          available: result.available,
+          version: result.version,
+        });
+      }
+    } catch (err) {
+      setUpdateError(err instanceof Error ? err.message : "Failed to check for updates");
+    } finally {
+      setIsCheckingUpdates(false);
+    }
   }, []);
 
   // Format timestamp for alert log
@@ -976,6 +990,14 @@ export function SettingsPanel({ className, defaultTab = "network" }: SettingsPan
                   Check for Updates
                 </Button>
               </div>
+
+              {updateError && (
+                <Alert variant="destructive">
+                  <AlertTriangle className="size-3.5" />
+                  <AlertTitle>Update check failed</AlertTitle>
+                  <AlertDescription>{updateError}</AlertDescription>
+                </Alert>
+              )}
 
               {updateStatus && (
                 <Alert

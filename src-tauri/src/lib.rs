@@ -28,9 +28,10 @@ pub fn run() {
             app.listen("shutdown", move |_event| {
                 let killer = killer.clone();
                 let scanner = scanner.clone();
+                let handle_clone = handle.clone();
                 tokio::spawn(async move {
                     cleanup_all_state(&killer, &scanner).await;
-                    drop(handle);
+                    drop(handle_clone);
                 });
             });
 

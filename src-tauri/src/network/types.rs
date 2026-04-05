@@ -194,6 +194,9 @@ pub enum NetworkError {
     #[error("Invalid MAC address format: {0}")]
     InvalidMacAddress(String),
 
+    #[error("Invalid MAC address: {0} - {1}")]
+    MacValidationError(String, MacValidationError),
+
     #[error("Invalid IP address format: {0}")]
     InvalidIpAddress(String),
 
@@ -208,6 +211,32 @@ pub enum NetworkError {
 
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+
+    #[error("Packet forwarding error: {0}")]
+    ForwardingError(String),
+
+    #[error("Connection tracking error: {0}")]
+    ConnectionTrackError(String),
+
+    #[error("IP forwarding not enabled on system")]
+    IpForwardingDisabled,
 }
 
 pub type Result<T> = std::result::Result<T, NetworkError>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum MacValidationError {
+    BroadcastAddress,
+    MulticastAddress,
+    AllZeros,
+}
+
+impl std::fmt::Display for MacValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MacValidationError::BroadcastAddress => write!(f, "broadcast"),
+            MacValidationError::MulticastAddress => write!(f, "multicast"),
+            MacValidationError::AllZeros => write!(f, "all-zeros"),
+        }
+    }
+}

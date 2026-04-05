@@ -6,7 +6,8 @@ import { DeviceTable } from "@/components/DeviceTable";
 import { ScanControls } from "@/components/ScanControls";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { HistoryPanel } from "@/components/HistoryPanel";
-import { Shield, Users, Settings, Clock, Moon, Sun } from "lucide-react";
+import { ForwardingPanel } from "@/components/ForwardingPanel";
+import { Shield, Users, Settings, Clock, Moon, Sun, ArrowLeftRight } from "lucide-react";
 import { useNetworkStore } from "@/stores/networkStore";
 import { ToastContainer } from "@/components/ToastContainer";
 import { useTauriEvents } from "@/hooks/useTauriEvents";
@@ -69,7 +70,7 @@ function App() {
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-4 mb-6">
+          <TabsList className="grid w-full grid-cols-5 mb-6">
             <TabsTrigger value="devices" className="flex items-center gap-2">
               <Users className="size-4" />
               Devices
@@ -77,6 +78,10 @@ function App() {
             <TabsTrigger value="history" className="flex items-center gap-2">
               <Clock className="size-4" />
               History
+            </TabsTrigger>
+            <TabsTrigger value="forwarding" className="flex items-center gap-2">
+              <ArrowLeftRight className="size-4" />
+              Forwarding
             </TabsTrigger>
             <TabsTrigger value="defender" className="flex items-center gap-2">
               <Shield className="size-4" />
@@ -95,6 +100,10 @@ function App() {
 
           <TabsContent value="history" className="space-y-6">
             <HistoryPanel />
+          </TabsContent>
+
+          <TabsContent value="forwarding" className="space-y-6">
+            <ForwardingPanel />
           </TabsContent>
 
           <TabsContent value="defender" className="space-y-6">

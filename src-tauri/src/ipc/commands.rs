@@ -1,8 +1,9 @@
 //! Tauri command handlers for CutNet IPC
 
+use crate::ipc::error::{ApiError, ApiResult};
 use crate::ipc::events::*;
 use crate::ipc::state::{KillerState, ScannerState};
-use crate::network::{NetworkInterface, NetworkError};
+use crate::network::NetworkInterface;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
@@ -22,14 +23,13 @@ pub struct SystemInfo {
     pub hostname: String,
 }
 
-/// Convert NetworkError to a string for Tauri Result
-fn map_error(e: NetworkError) -> String {
-    e.to_string()
+fn map_error(e: crate::network::types::NetworkError) -> ApiError {
+    ApiError::from(e)
 }
 
 /// Get all network interfaces available on the system
 #[tauri::command]
-pub async fn get_interfaces() -> Result<Vec<NetworkInterface>, String> {
+pub async fn get_interfaces() -> ApiResult<Vec<NetworkInterface>> {
     log::info!("Getting network interfaces");
 
     match get_if_addrs::get_if_addrs() {
@@ -66,7 +66,10 @@ pub async fn get_interfaces() -> Result<Vec<NetworkInterface>, String> {
         }
         Err(e) => {
             log::error!("Failed to get interfaces: {}", e);
-            Err(format!("Failed to get interfaces: {}", e))
+            Err(ApiError::new(
+                crate::ipc::error::ErrorCode::IoError,
+                "Failed to get network interfaces"
+            ).with_details(e.to_string()))
         }
     }
 }
@@ -78,13 +81,16 @@ pub async fn start_arp_scan(
     scanner: State<'_, ScannerState>,
     killer: State<'_, KillerState>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> ApiResult<()> {
     log::info!("Starting ARP scan on interface: {}", interface_name);
 
     let mut scanner_lock = scanner.lock().await;
 
     if scanner_lock.is_running() {
-        return Err("Scan already in progress".to_string());
+        return Err(ApiError::new(
+            crate::ipc::error::ErrorCode::ScanError,
+            "Scan already in progress"
+        ));
     }
 
     match scanner_lock.start_arp_scan(interface_name.clone(), app, scanner.inner().clone()) {
@@ -116,13 +122,16 @@ pub async fn start_ping_scan(
     scanner: State<'_, ScannerState>,
     killer: State<'_, KillerState>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> ApiResult<()> {
     log::info!("Starting ping scan on interface: {}", interface_name);
 
     let mut scanner_lock = scanner.lock().await;
 
     if scanner_lock.is_running() {
-        return Err("Scan already in progress".to_string());
+        return Err(ApiError::new(
+            crate::ipc::error::ErrorCode::ScanError,
+            "Scan already in progress"
+        ));
     }
 
     match scanner_lock.start_ping_scan(interface_name.clone(), app, scanner.inner().clone()) {
@@ -149,7 +158,7 @@ pub async fn start_ping_scan(
 
 /// Stop any active scan
 #[tauri::command]
-pub async fn stop_scan(scanner: State<'_, ScannerState>) -> Result<(), String> {
+pub async fn stop_scan(scanner: State<'_, ScannerState>) -> ApiResult<()> {
     log::info!("Stopping scan");
 
     let mut scanner_lock = scanner.lock().await;
@@ -166,7 +175,7 @@ pub async fn kill_device(
     mac: String,
     killer: State<'_, KillerState>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> ApiResult<()> {
     log::info!("Killing device: {} ({})", ip, mac);
 
     let mut killer_lock = killer.lock().await;
@@ -204,7 +213,7 @@ pub async fn unkill_device(
         }
         Err(e) => {
             log::error!("Failed to restore device: {}", e);
-            Err(map_error(e))
+            Err(e.to_string())
         }
     }
 }
@@ -255,7 +264,7 @@ pub async fn unkill_all_devices(
         }
         Err(e) => {
             log::error!("Failed to restore all devices: {}", e);
-            Err(map_error(e))
+            Err(e.to_string())
         }
     }
 }

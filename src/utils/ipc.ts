@@ -3,6 +3,60 @@ import { listen } from "@tauri-apps/api/event";
 import type { Device, NetworkInterface } from "@/lib/schemas";
 import { NetworkInterfaceSchema } from "@/lib/schemas";
 
+export interface ApiError {
+  code: string;
+  user_message: string;
+  retryable: boolean;
+  suggested_action?: string;
+  technical_details?: string;
+}
+
+export function isApiError(err: unknown): err is ApiError {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    "user_message" in err &&
+    typeof (err as ApiError).code === "string" &&
+    typeof (err as ApiError).user_message === "string"
+  );
+}
+
+export function parseApiError(err: unknown): ApiError {
+  if (isApiError(err)) {
+    return err;
+  }
+  
+  if (err instanceof Error) {
+    return {
+      code: "UNKNOWN_ERROR",
+      user_message: err.message,
+      retryable: false,
+    };
+  }
+  
+  if (typeof err === "string") {
+    try {
+      const parsed = JSON.parse(err);
+      if (isApiError(parsed)) {
+        return parsed;
+      }
+    } catch {
+      return {
+        code: "UNKNOWN_ERROR",
+        user_message: err,
+        retryable: false,
+      };
+    }
+  }
+  
+  return {
+    code: "UNKNOWN_ERROR",
+    user_message: "An unexpected error occurred",
+    retryable: false,
+  };
+}
+
 export async function getInterfaces(): Promise<NetworkInterface[]> {
   const result = await invoke<NetworkInterface[]>("get_interfaces");
   return result.map((iface) => NetworkInterfaceSchema.parse(iface));
