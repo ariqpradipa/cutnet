@@ -682,7 +682,7 @@ export function DeviceTable() {
                       </span>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p>Coming Soon</p>
+                      <p>Click a device row to set bandwidth limits</p>
                     </TooltipContent>
                   </Tooltip>
                 </TableHead>

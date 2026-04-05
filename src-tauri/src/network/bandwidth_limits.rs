@@ -86,6 +86,7 @@ pub async fn apply_saved_limits() -> Result<(), Box<dyn std::error::Error + Send
 }
 
 /// Save current limits from the bandwidth controller
+#[allow(dead_code)]
 pub async fn persist_current_limits() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let controller = get_bandwidth_controller().await;
     
@@ -147,6 +148,7 @@ pub async fn get_persisted_limits() -> Result<Vec<BandwidthLimit>, Box<dyn std::
 }
 
 /// Clear all limits and remove persistence
+#[allow(dead_code)]
 pub async fn clear_all_limits() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let controller = get_bandwidth_controller().await;
     

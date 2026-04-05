@@ -21,6 +21,7 @@ pub struct BandwidthLimit {
     pub enabled: bool,
 }
 
+#[allow(dead_code)]
 impl BandwidthLimit {
     pub fn new(mac: impl Into<String>) -> Self {
         Self {
@@ -31,16 +32,19 @@ impl BandwidthLimit {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_download_limit(mut self, kbps: u32) -> Self {
         self.download_limit_kbps = Some(kbps);
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_upload_limit(mut self, kbps: u32) -> Self {
         self.upload_limit_kbps = Some(kbps);
         self
     }
 
+    #[allow(dead_code)]
     pub fn enabled(mut self) -> Self {
         self.enabled = true;
         self
@@ -59,6 +63,7 @@ pub struct BandwidthStats {
 
 /// Errors specific to bandwidth operations
 #[derive(Debug, thiserror::Error)]
+#[allow(dead_code)]
 pub enum BandwidthError {
     #[error("Platform not supported: {0}")]
     PlatformNotSupported(String),
@@ -103,6 +108,7 @@ impl BandwidthController {
     }
 
     /// Get the interface name
+    #[allow(dead_code)]
     pub fn interface(&self) -> &str {
         &self.interface
     }
@@ -194,6 +200,7 @@ impl BandwidthController {
     }
 
     /// Get bandwidth limit for a specific device
+    #[allow(dead_code)]
     pub async fn get_limit(&self, mac: &str) -> Option<BandwidthLimit> {
         let mac_normalized = mac.to_lowercase();
         let limits = self.limits.read().await;
