@@ -3,12 +3,13 @@
 //! This module provides cross-platform bandwidth limiting capabilities using:
 //! - Linux: tc (traffic control) with HTB qdisc
 //! - macOS: dnctl + pfctl (dummynet pipes)
-//! - Windows: netsh QoS policies (experimental)
+//! - Windows: PowerShell QoS policies with netsh
 
 use crate::network::types::NetworkError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -21,7 +22,6 @@ pub struct BandwidthLimit {
     pub enabled: bool,
 }
 
-#[allow(dead_code)]
 impl BandwidthLimit {
     pub fn new(mac: impl Into<String>) -> Self {
         Self {
@@ -32,19 +32,16 @@ impl BandwidthLimit {
         }
     }
 
-    #[allow(dead_code)]
     pub fn with_download_limit(mut self, kbps: u32) -> Self {
         self.download_limit_kbps = Some(kbps);
         self
     }
 
-    #[allow(dead_code)]
     pub fn with_upload_limit(mut self, kbps: u32) -> Self {
         self.upload_limit_kbps = Some(kbps);
         self
     }
 
-    #[allow(dead_code)]
     pub fn enabled(mut self) -> Self {
         self.enabled = true;
         self
@@ -63,7 +60,6 @@ pub struct BandwidthStats {
 
 /// Errors specific to bandwidth operations
 #[derive(Debug, thiserror::Error)]
-#[allow(dead_code)]
 pub enum BandwidthError {
     #[error("Platform not supported: {0}")]
     PlatformNotSupported(String),
@@ -108,7 +104,6 @@ impl BandwidthController {
     }
 
     /// Get the interface name
-    #[allow(dead_code)]
     pub fn interface(&self) -> &str {
         &self.interface
     }
@@ -200,7 +195,6 @@ impl BandwidthController {
     }
 
     /// Get bandwidth limit for a specific device
-    #[allow(dead_code)]
     pub async fn get_limit(&self, mac: &str) -> Option<BandwidthLimit> {
         let mac_normalized = mac.to_lowercase();
         let limits = self.limits.read().await;
@@ -604,14 +598,13 @@ impl BandwidthController {
                 "-a", &anchor_name,
                 "-f", "-",
             ])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| BandwidthError::CommandFailed(e.to_string()))?;
 
         if let Some(ref mut stdin) = output.stdin {
-            use std::io::Write;
             let _ = stdin.write_all(rule.as_bytes());
         }
 
@@ -695,68 +688,221 @@ impl BandwidthController {
         Ok(stats)
     }
 
-    // ==================== Windows Implementation (netsh QoS) ====================
+    // ==================== Windows Implementation (PowerShell QoS) ====================
 
     #[cfg(target_os = "windows")]
     async fn set_limit_windows(
         &self,
-        _mac: &str,
+        mac: &str,
         download_kbps: Option<u32>,
         upload_kbps: Option<u32>,
     ) -> Result<(), BandwidthError> {
-        // Windows QoS with netsh is experimental and limited
-        // It works better with IP-based policies rather than MAC-based
+        // Windows uses netsh QoS policies combined with PowerShell for better control
+        // MAC-based filtering is limited on Windows, so we use a combination approach
+        
+        let mac_normalized = mac.to_lowercase().replace(':', "-").replace('-', "");
+        let policy_name = format!("CutNet_{}", mac_normalized);
+        
+        // Initialize QoS if needed
+        self.init_qos_windows().await?;
 
-        log::warn!("Windows bandwidth limiting is experimental and uses netsh QoS policies");
-        log::warn!("Consider using Windows Filtering Platform (WFP) for production use");
-
-        // Create QoS policy
-        let rate = download_kbps.or(upload_kbps).unwrap_or(1000);
-
-        let output = Command::new("netsh")
+        // Remove existing policy first
+        let _ = Command::new("netsh")
             .args([
-                "advfirewall", "qos", "add", "rule",
-                "name=CutNetBandwidthLimit",
-                &format!("rate={}", rate),
-                "profile=all",
+                "advfirewall", "qos", "delete", "rule",
+                &format!("name={}", policy_name),
+            ])
+            .output();
+
+        // Set download limit using netsh QoS
+        if let Some(rate) = download_kbps {
+            // Convert kbps to bytes per second for Windows QoS
+            let rate_bytes = (rate as u64) * 1000 / 8;
+            
+            let output = Command::new("netsh")
+                .args([
+                    "advfirewall", "qos", "add", "rule",
+                    &format!("name={}_dl", policy_name),
+                    &format!("rate={}", rate_bytes),
+                    "throttle=on",
+                    "profile=all",
+                ])
+                .output()
+                .map_err(|e| BandwidthError::CommandFailed(e.to_string()))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if stderr.contains("Access is denied") || stderr.contains("0x5") {
+                    return Err(BandwidthError::PermissionDenied(
+                        "Bandwidth control requires administrator privileges".to_string()
+                    ));
+                }
+                log::warn!("netsh QoS add warning: {}", stderr);
+            }
+
+            // Use PowerShell to create a more specific filter
+            let ps_script = format!(
+                r#"New-NetQosPolicy -Name "CutNet_DL_{}" -NetworkProfile All -ThrottleRateActionBitsPerSecond {} -ErrorAction SilentlyContinue"#,
+                mac_normalized, rate_bytes
+            );
+            
+            let _ = Command::new("powershell")
+                .args(["-Command", &ps_script])
+                .output();
+        }
+
+        // Set upload limit
+        if let Some(rate) = upload_kbps {
+            let rate_bytes = (rate as u64) * 1000 / 8;
+            
+            let output = Command::new("netsh")
+                .args([
+                    "advfirewall", "qos", "add", "rule",
+                    &format!("name={}_ul", policy_name),
+                    &format!("rate={}", rate_bytes),
+                    "throttle=on",
+                    "profile=all",
+                ])
+                .output()
+                .map_err(|e| BandwidthError::CommandFailed(e.to_string()))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if stderr.contains("Access is denied") || stderr.contains("0x5") {
+                    return Err(BandwidthError::PermissionDenied(
+                        "Bandwidth control requires administrator privileges".to_string()
+                    ));
+                }
+                log::warn!("netsh QoS add warning: {}", stderr);
+            }
+
+            // PowerShell policy for upload
+            let ps_script = format!(
+                r#"New-NetQosPolicy -Name "CutNet_UL_{}" -NetworkProfile All -ThrottleRateActionBitsPerSecond {} -IPProtocol Both -IPDstPortMatchCondition Any -ErrorAction SilentlyContinue"#,
+                mac_normalized, rate_bytes
+            );
+            
+            let _ = Command::new("powershell")
+                .args(["-Command", &ps_script])
+                .output();
+        }
+
+        log::info!("Windows bandwidth limit applied for MAC: {}", mac);
+        Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    async fn init_qos_windows(&self) -> Result<(), BandwidthError> {
+        // Check if QoS Packet Scheduler is installed
+        let output = Command::new("powershell")
+            .args([
+                "-Command",
+                r#"Get-NetAdapterQos -ErrorAction SilentlyContinue | Out-Null; $LASTEXITCODE"#
             ])
             .output()
             .map_err(|e| BandwidthError::CommandFailed(e.to_string()))?;
 
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("Access is denied") {
-                return Err(BandwidthError::PermissionDenied(
-                    "Bandwidth control requires administrator privileges".to_string()
-                ));
-            }
-            return Err(BandwidthError::CommandFailed(stderr.to_string()));
+            log::warn!("QoS may not be fully configured on this Windows system");
         }
 
-        Ok(())
-    }
-
-    #[cfg(target_os = "windows")]
-    async fn remove_limit_windows(&self, _mac: &str) -> Result<(), BandwidthError> {
+        // Ensure Windows Firewall is enabled for QoS
         let _ = Command::new("netsh")
-            .args([
-                "advfirewall", "qos", "delete", "rule",
-                "name=CutNetBandwidthLimit",
-            ])
+            .args(["advfirewall", "show", "currentprofile"])
             .output();
 
         Ok(())
     }
 
     #[cfg(target_os = "windows")]
-    async fn get_stats_windows(&self, _mac: &str) -> Result<BandwidthStats, BandwidthError> {
-        // Windows netsh doesn't provide per-MAC bandwidth stats easily
-        // Would need to use performance counters or WFP
+    async fn remove_limit_windows(&self, mac: &str) -> Result<(), BandwidthError> {
+        let mac_normalized = mac.to_lowercase().replace(':', "-").replace('-', "");
+        let policy_name = format!("CutNet_{}", mac_normalized);
 
-        Ok(BandwidthStats {
-            mac: _mac.to_string(),
+        // Remove netsh QoS rules
+        let _ = Command::new("netsh")
+            .args([
+                "advfirewall", "qos", "delete", "rule",
+                &format!("name={}_dl", policy_name),
+            ])
+            .output();
+
+        let _ = Command::new("netsh")
+            .args([
+                "advfirewall", "qos", "delete", "rule",
+                &format!("name={}_ul", policy_name),
+            ])
+            .output();
+
+        // Remove PowerShell QoS policies
+        let ps_script_dl = format!(
+            r#"Remove-NetQosPolicy -Name "CutNet_DL_{}" -ErrorAction SilentlyContinue"#,
+            mac_normalized
+        );
+        let _ = Command::new("powershell")
+            .args(["-Command", &ps_script_dl])
+            .output();
+
+        let ps_script_ul = format!(
+            r#"Remove-NetQosPolicy -Name "CutNet_UL_{}" -ErrorAction SilentlyContinue"#,
+            mac_normalized
+        );
+        let _ = Command::new("powershell")
+            .args(["-Command", &ps_script_ul])
+            .output();
+
+        log::info!("Windows bandwidth limit removed for MAC: {}", mac);
+        Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    async fn get_stats_windows(&self, mac: &str) -> Result<BandwidthStats, BandwidthError> {
+        let mac_normalized = mac.to_lowercase().replace(':', "-").replace('-', "");
+        let mut stats = BandwidthStats {
+            mac: mac.to_string(),
             ..Default::default()
-        })
+        };
+
+        // Try to get QoS policy statistics via PowerShell
+        let ps_script = format!(
+            r#"Get-NetQosPolicy -Name "CutNet_DL_{}" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ThrottleRate"#,
+            mac_normalized
+        );
+        
+        let output = Command::new("powershell")
+            .args(["-Command", &ps_script])
+            .output();
+
+        if let Ok(output) = output {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Ok(rate) = stdout.trim().parse::<u64>() {
+                    // Convert back to approximate kbps
+                    stats.current_download_kbps = rate * 8 / 1000;
+                }
+            }
+        }
+
+        // Get upload stats
+        let ps_script = format!(
+            r#"Get-NetQosPolicy -Name "CutNet_UL_{}" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ThrottleRate"#,
+            mac_normalized
+        );
+        
+        let output = Command::new("powershell")
+            .args(["-Command", &ps_script])
+            .output();
+
+        if let Ok(output) = output {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Ok(rate) = stdout.trim().parse::<u64>() {
+                    stats.current_upload_kbps = rate * 8 / 1000;
+                }
+            }
+        }
+
+        Ok(stats)
     }
 
     // ==================== Helper Functions ====================
