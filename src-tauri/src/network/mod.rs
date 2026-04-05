@@ -4,6 +4,7 @@ pub mod defender;
 pub mod device_names;
 pub mod history;
 pub mod mac_ops;
+pub mod poison_state;
 pub mod poisoner;
 pub mod scanner;
 pub mod types;

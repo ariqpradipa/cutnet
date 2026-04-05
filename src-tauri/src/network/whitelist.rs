@@ -111,9 +111,23 @@ impl WhitelistManager {
     pub async fn is_protected(&self, mac: &str) -> bool {
         self.protect_enabled && self.entries.contains_key(&mac.to_lowercase())
     }
+
+    /// Atomic check for both whitelisted and protected status.
+    ///
+    /// VULN-004 Fix: This function checks BOTH whitelist membership AND
+    /// protection status under a SINGLE RwLock read, preventing the TOCTOU
+    /// (Time-of-Check-Time-of-Use) race condition that existed when using
+    /// two separate `.await` calls.
+    ///
+    /// Returns (is_whitelisted, is_protected) as a tuple.
+    pub fn is_whitelisted_and_protected(&self, mac: &str) -> (bool, bool) {
+        let mac_lower = mac.to_lowercase();
+        let is_whitelisted = self.entries.contains_key(&mac_lower);
+        let is_protected = self.protect_enabled && is_whitelisted;
+        (is_whitelisted, is_protected)
+    }
 }
 
-// Public API functions
 pub async fn add_entry(mac: String, label: Option<String>) -> Result<(), NetworkError> {
     let mut wl = WHITELIST.write().await;
     wl.add_entry(mac, label).await
@@ -143,4 +157,17 @@ pub async fn set_protect_enabled(enabled: bool) -> Result<(), NetworkError> {
 pub async fn is_protected(mac: &str) -> bool {
     let wl = WHITELIST.read().await;
     wl.is_protected(mac).await
+}
+
+/// Atomic check for both whitelisted and protected status.
+///
+/// VULN-004 Fix: This function replaces the two separate `.await` calls
+/// that created a TOCTOU race condition. By acquiring the lock once and
+/// checking both conditions atomically, the whitelist state cannot change
+/// between the check and the use.
+///
+/// Returns (is_whitelisted, is_protected) as a tuple under a single lock.
+pub async fn check_whitelist_protection(mac: &str) -> (bool, bool) {
+    let wl = WHITELIST.read().await;
+    wl.is_whitelisted_and_protected(mac)
 }

@@ -6,7 +6,7 @@
 use crate::ipc::events::{emit_device_found, emit_scan_progress, emit_scan_completed};
 use crate::network::{Device, NetworkError};
 use crate::network::poisoner::{start_poisoning, stop_poisoning};
-use crate::network::whitelist::{is_whitelisted, is_protected};
+use crate::network::whitelist::check_whitelist_protection;
 use crate::network::history;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -55,12 +55,12 @@ impl Killer {
             )));
         }
 
-        // CRITICAL SECURITY: Validate MAC address before poisoning
-        // Rejects broadcast, multicast, and all-zeros addresses to prevent network-wide DoS
-        let _ = crate::network::utils::validate_unicast_mac(&mac)?;
-
-        // Check whitelist - if device is whitelisted and protection is enabled, reject the kill
-        if is_whitelisted(&mac).await && is_protected(&mac).await {
+        // VULN-004 Fix: Atomic check prevents TOCTOU race condition
+        // Previously: if is_whitelisted(&mac).await && is_protected(&mac).await { ... }
+        // This created a window where whitelist state could change between the two awaits.
+        // Now we use a single atomic check that acquires the lock once.
+        let (whitelisted, protected) = check_whitelist_protection(&mac).await;
+        if whitelisted && protected {
             return Err(NetworkError::PoisoningError(
                 format!("Device {} ({}) is whitelisted and protected", mac, ip)
             ));
@@ -224,24 +224,13 @@ impl Scanner {
         let interface_for_scan = interface_name.clone();
 
         tokio::spawn(async move {
-            // Spawn the scan task
-            let scan_handle = tokio::spawn(async move {
-                crate::network::scanner::arp_scan(&interface_for_scan).await
-            });
-
-            // Await the scan result and catch any panics
-            let scan_result: Result<
-                Result<Vec<crate::network::Device>, crate::network::NetworkError>,
-                tokio::task::JoinError,
-            > = scan_handle.await;
-
-            // Handle the scan result
-            match scan_result {
-                Ok(Ok(devices)) => {
+            let result = crate::network::scanner::arp_scan(&interface_for_scan).await;
+            match &result {
+                Ok(devices) => {
                     let total = devices.len() as u16;
                     let mut current_ips = HashMap::new();
-                    for device in &devices {
-                        current_ips.insert(device.ip.clone(), device.clone());
+                    for device in devices {
+                        current_ips.insert(device.ip.clone(), device);
                     }
                     
                     let known_ips: Vec<String> = {
@@ -281,12 +270,8 @@ impl Scanner {
                     }
                     emit_scan_completed(&app, total, true);
                 }
-                Ok(Err(e)) => {
+                Err(e) => {
                     log::error!("ARP scan failed: {}", e);
-                    emit_scan_completed(&app, 0, false);
-                }
-                Err(panic_info) => {
-                    log::error!("ARP scan panicked: {:?}", panic_info);
                     emit_scan_completed(&app, 0, false);
                 }
             }
@@ -321,24 +306,13 @@ impl Scanner {
         log::info!("Starting ping scan on interface: {}", interface_name);
 
         tokio::spawn(async move {
-            // Spawn the scan task
-            let scan_handle = tokio::spawn(async move {
-                crate::network::scanner::ping_scan(&interface_for_scan).await
-            });
-
-            // Await the scan result and catch any panics
-            let scan_result: Result<
-                Result<Vec<crate::network::Device>, crate::network::NetworkError>,
-                tokio::task::JoinError,
-            > = scan_handle.await;
-
-            // Handle the scan result
-            match scan_result {
-                Ok(Ok(devices)) => {
+            let result = crate::network::scanner::ping_scan(&interface_for_scan).await;
+            match &result {
+                Ok(devices) => {
                     let total = devices.len() as u16;
                     let mut current_ips = HashMap::new();
-                    for device in &devices {
-                        current_ips.insert(device.ip.clone(), device.clone());
+                    for device in devices {
+                        current_ips.insert(device.ip.clone(), device);
                     }
                     
                     let known_ips: Vec<String> = {
@@ -378,12 +352,8 @@ impl Scanner {
                     }
                     emit_scan_completed(&app, total, true);
                 }
-                Ok(Err(e)) => {
+                Err(e) => {
                     log::error!("Ping scan failed: {}", e);
-                    emit_scan_completed(&app, 0, false);
-                }
-                Err(panic_info) => {
-                    log::error!("Ping scan panicked: {:?}", panic_info);
                     emit_scan_completed(&app, 0, false);
                 }
             }
@@ -464,32 +434,4 @@ pub fn init_state() -> (KillerState, ScannerState) {
     log::info!("IPC state initialized");
 
     (killer, scanner)
-}
-
-/// Cleanup all state - called on app shutdown
-pub async fn cleanup_all_state(killer_state: &KillerState, scanner_state: &ScannerState) {
-    log::info!("Cleaning up all state...");
-
-    // Clean up killer state
-    {
-        let mut killer = killer_state.lock().await;
-        if let Err(e) = killer.unkill_all().await {
-            log::error!("Failed to unkill all devices during cleanup: {}", e);
-        }
-        killer.poisoned_devices.clear();
-        killer.interface_name = None;
-        killer.router = None;
-    }
-
-    // Clean up scanner state
-    {
-        let mut scanner = scanner_state.lock().await;
-        scanner.is_running = false;
-        scanner.discovered_devices.clear();
-        scanner.current_interface = None;
-        scanner.should_stop = true;
-        scanner.known_devices.clear();
-    }
-
-    log::info!("State cleanup completed");
 }

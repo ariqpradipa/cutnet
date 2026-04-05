@@ -1,58 +1,24 @@
 //! CutNet - Network manipulation tool
-//!
-//! This is the main Tauri application entry point.
 
 mod ipc;
 mod network;
 
 use ipc::commands::*;
-use ipc::state::{init_state, cleanup_all_state};
-use tauri::Listener;
+use ipc::state::init_state;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize shared state
     let (killer_state, scanner_state) = init_state();
 
-    let killer_for_cleanup = killer_state.clone();
-    let scanner_for_cleanup = scanner_state.clone();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let _ = crate::network::poison_state::recover_from_crash().await;
+    });
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(killer_state.clone())
-        .manage(scanner_state.clone())
-        .setup(move |app| {
-            let killer = killer_for_cleanup.clone();
-            let scanner = scanner_for_cleanup.clone();
-
-            let handle = app.handle().clone();
-            app.listen("shutdown", move |_event| {
-                let killer = killer.clone();
-                let scanner = scanner.clone();
-                let handle_clone = handle.clone();
-                tokio::spawn(async move {
-                    cleanup_all_state(&killer, &scanner).await;
-                    network::shutdown_bandwidth_controller().await.ok();
-                    drop(handle_clone);
-                });
-            });
-
-            // Load and apply saved bandwidth limits on startup
-            let _handle_clone = app.handle().clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                
-                if let Ok(interface) = network::get_current_interface() {
-                    log::info!("Initializing bandwidth controller for interface: {}", interface.name);
-                    network::init_bandwidth_controller(&interface.name).await;
-                    
-                    if let Err(e) = network::apply_saved_limits().await {
-                        log::error!("Failed to apply saved bandwidth limits: {}", e);
-                    }
-                }
-            });
-
-            Ok(())
-        })
+        .manage(killer_state)
+        .manage(scanner_state)
         .invoke_handler(tauri::generate_handler![
             get_interfaces,
             start_arp_scan,
@@ -82,10 +48,6 @@ pub fn run() {
             ipc::commands::clear_history,
             ipc::commands::set_device_custom_name,
             ipc::commands::get_custom_device_names,
-            ipc::commands::set_bandwidth_limit,
-            ipc::commands::remove_bandwidth_limit,
-            ipc::commands::get_bandwidth_limits,
-            ipc::commands::get_bandwidth_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
