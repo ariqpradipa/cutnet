@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback } from "react"
 import { useDeviceStore } from "@/stores/deviceStore"
 import { useNetworkStore } from "@/stores/networkStore"
-import { killDevice, unkillDevice } from "@/utils/ipc"
+import { killDevice, unkillDevice, killAllDevices, unkillAllDevices } from "@/utils/ipc"
 import type { Device, KillState } from "@/lib/schemas"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -24,6 +24,16 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog"
+import { Separator } from "@/components/ui/separator"
+import {
   Wifi,
   ShieldAlert,
   MoreVertical,
@@ -33,8 +43,13 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  Router,
+  Monitor,
+  Copy,
+  Check,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useToast } from "@/hooks/useToast"
 
 type SortField = "status" | "ip" | "mac" | "vendor" | "hostname" | "actions"
 type SortDirection = "asc" | "desc"
@@ -82,9 +97,12 @@ export function DeviceTable() {
   const { devices, selectedDevice, killStates, selectDevice, setKillState } =
     useDeviceStore()
   const { isScanning } = useNetworkStore()
+  const { toast } = useToast()
 
   const [sort, setSort] = useState<SortState>({ field: "ip", direction: "asc" })
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
+  const [showDetailDialog, setShowDetailDialog] = useState(false)
+  const [copiedField, setCopiedField] = useState<string | null>(null)
 
   const handleSort = useCallback(
     (field: SortField) => {
@@ -164,6 +182,7 @@ export function DeviceTable() {
             is_killed: false,
             kill_type: "none",
           });
+          toast({ title: "Device restored", description: `${device.ip} is back online`, variant: "default" });
         } else {
           await killDevice(device);
           setKillState(device.mac, {
@@ -171,6 +190,7 @@ export function DeviceTable() {
             is_killed: true,
             kill_type: "arp_poison",
           });
+          toast({ title: "Device killed", description: `${device.ip} has been disconnected`, variant: "destructive" });
         }
       } catch (err) {
         setKillState(device.mac, {
@@ -179,11 +199,67 @@ export function DeviceTable() {
           kill_type: wasKilled ? "arp_poison" : "none",
         });
         console.error(`Failed to ${wasKilled ? 'unkill' : 'kill'} device ${device.ip}:`, err);
-        alert(`Failed to ${wasKilled ? 'restore' : 'kill'} device ${device.ip}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        toast({
+          title: "Operation failed",
+          description: `Failed to ${wasKilled ? 'restore' : 'kill'} ${device.ip}: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          variant: "destructive",
+        });
       }
     },
-    [killStates, setKillState]
+    [killStates, setKillState, toast]
   )
+
+  const handleKillAll = useCallback(async () => {
+    const killableDevices = devices.filter(d => !killStates.get(d.mac)?.is_killed && !d.is_me);
+    if (killableDevices.length === 0) {
+      toast({ title: "No devices to kill", description: "All devices are already killed or this is your machine.", variant: "default" });
+      return;
+    }
+
+    try {
+      await killAllDevices(killableDevices);
+      for (const device of killableDevices) {
+        setKillState(device.mac, {
+          mac: device.mac,
+          is_killed: true,
+          kill_type: "arp_poison",
+        });
+      }
+      toast({ title: "All devices killed", description: `${killableDevices.length} device(s) disconnected`, variant: "destructive" });
+    } catch (err) {
+      toast({
+        title: "Kill All failed",
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: "destructive",
+      });
+    }
+  }, [devices, killStates, setKillState, toast]);
+
+  const handleUnkillAll = useCallback(async () => {
+    const killedDevices = devices.filter(d => killStates.get(d.mac)?.is_killed);
+    if (killedDevices.length === 0) {
+      toast({ title: "No devices to restore", description: "No devices are currently killed.", variant: "default" });
+      return;
+    }
+
+    try {
+      await unkillAllDevices();
+      for (const device of killedDevices) {
+        setKillState(device.mac, {
+          mac: device.mac,
+          is_killed: false,
+          kill_type: "none",
+        });
+      }
+      toast({ title: "All devices restored", description: `${killedDevices.length} device(s) reconnected`, variant: "default" });
+    } catch (err) {
+      toast({
+        title: "Unkill All failed",
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: "destructive",
+      });
+    }
+  }, [devices, killStates, setKillState, toast]);
 
   const handleSelectAll = useCallback(
     (checked: boolean) => {
@@ -209,12 +285,45 @@ export function DeviceTable() {
     [selectedRows]
   )
 
+  const handleCopy = useCallback((text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 1500);
+  }, []);
+
   const allSelected = devices.length > 0 && selectedRows.size === devices.length
   const someSelected = selectedRows.size > 0 && selectedRows.size < devices.length
+  const killedCount = devices.filter(d => killStates.get(d.mac)?.is_killed).length;
 
   return (
     <TooltipProvider>
       <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleKillAll}
+            disabled={devices.length === 0}
+          >
+            <PowerOff data-icon="inline-start" />
+            Kill All
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleUnkillAll}
+            disabled={killedCount === 0}
+          >
+            <Power data-icon="inline-start" />
+            Unkill All
+          </Button>
+          {killedCount > 0 && (
+            <Badge variant="destructive" className="ml-auto">
+              {killedCount} killed
+            </Badge>
+          )}
+        </div>
+
         {selectedRows.size > 0 && (
           <div className="flex items-center gap-2 px-2">
             <span className="text-xs text-muted-foreground">
@@ -242,7 +351,13 @@ export function DeviceTable() {
                 }
 
                 if (failedDevices.length > 0) {
-                  alert(`Failed to kill devices: ${failedDevices.join(", ")}`);
+                  toast({
+                    title: "Partial failure",
+                    description: `Failed to kill: ${failedDevices.join(", ")}`,
+                    variant: "destructive",
+                  });
+                } else {
+                  toast({ title: "Devices killed", description: `${selectedDevices.length} device(s) disconnected`, variant: "destructive" });
                 }
                 setSelectedRows(new Set());
               }}
@@ -272,7 +387,13 @@ export function DeviceTable() {
                 }
 
                 if (failedDevices.length > 0) {
-                  alert(`Failed to restore devices: ${failedDevices.join(", ")}`);
+                  toast({
+                    title: "Partial failure",
+                    description: `Failed to restore: ${failedDevices.join(", ")}`,
+                    variant: "destructive",
+                  });
+                } else {
+                  toast({ title: "Devices restored", description: `${selectedDevices.length} device(s) reconnected` });
                 }
                 setSelectedRows(new Set());
               }}
@@ -381,10 +502,34 @@ export function DeviceTable() {
                         />
                       </TableCell>
                       <TableCell>
-                        <Badge variant={status.variant}>
-                          <StatusIcon data-icon="inline-start" />
-                          {status.label}
-                        </Badge>
+                        <div className="flex items-center gap-1">
+                          <Badge variant={status.variant}>
+                            <StatusIcon data-icon="inline-start" />
+                            {status.label}
+                          </Badge>
+                          {device.is_router && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Badge variant="outline" className="text-amber-600 border-amber-300 dark:border-amber-700 dark:text-amber-400">
+                                  <Router data-icon="inline-start" />
+                                  Router
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent>Default Gateway</TooltipContent>
+                            </Tooltip>
+                          )}
+                          {device.is_me && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Badge variant="secondary">
+                                  <Monitor data-icon="inline-start" />
+                                  You
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent>This machine</TooltipContent>
+                            </Tooltip>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="font-mono text-xs">
                         {device.ip}
@@ -428,6 +573,7 @@ export function DeviceTable() {
                                 onClick={(e) => {
                                   e.stopPropagation()
                                   selectDevice(device)
+                                  setShowDetailDialog(true)
                                 }}
                               >
                                 <Info className="size-3" />
@@ -458,6 +604,140 @@ export function DeviceTable() {
           </Table>
         </ScrollArea>
       </div>
+
+      <Dialog open={showDetailDialog} onOpenChange={setShowDetailDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Monitor className="size-4" />
+              Device Details
+            </DialogTitle>
+            <DialogDescription>
+              {selectedDevice?.ip || "No device selected"}
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedDevice && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                {selectedDevice.is_router && (
+                  <Badge variant="outline" className="text-amber-600 border-amber-300 dark:border-amber-700 dark:text-amber-400">
+                    <Router data-icon="inline-start" />
+                    Router
+                  </Badge>
+                )}
+                {selectedDevice.is_me && (
+                  <Badge variant="secondary">
+                    <Monitor data-icon="inline-start" />
+                    This Machine
+                  </Badge>
+                )}
+                {killStates.get(selectedDevice.mac)?.is_killed ? (
+                  <Badge variant="destructive">
+                    <ShieldAlert data-icon="inline-start" />
+                    Killed
+                  </Badge>
+                ) : (
+                  <Badge variant="default">
+                    <Wifi data-icon="inline-start" />
+                    Online
+                  </Badge>
+                )}
+              </div>
+
+              <Separator />
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-muted-foreground">IP Address</p>
+                    <p className="font-mono text-sm">{selectedDevice.ip}</p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => handleCopy(selectedDevice.ip, "ip")}
+                  >
+                    {copiedField === "ip" ? (
+                      <Check className="size-3.5 text-emerald-500" />
+                    ) : (
+                      <Copy className="size-3.5" />
+                    )}
+                  </Button>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-muted-foreground">MAC Address</p>
+                    <p className="font-mono text-sm">{selectedDevice.mac}</p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => handleCopy(selectedDevice.mac, "mac")}
+                  >
+                    {copiedField === "mac" ? (
+                      <Check className="size-3.5 text-emerald-500" />
+                    ) : (
+                      <Copy className="size-3.5" />
+                    )}
+                  </Button>
+                </div>
+
+                <div>
+                  <p className="text-xs text-muted-foreground">Hostname</p>
+                  <p className="text-sm">{selectedDevice.hostname || "Unknown"}</p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-muted-foreground">Vendor</p>
+                  <p className="text-sm">{selectedDevice.vendor || "Unknown"}</p>
+                </div>
+              </div>
+
+              <Separator />
+
+              <DialogFooter className="gap-2 sm:gap-0">
+                <DialogClose asChild>
+                  <Button variant="outline">Close</Button>
+                </DialogClose>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    toast({
+                      title: "Whitelist",
+                      description: `${selectedDevice.mac} added to whitelist`,
+                    });
+                    setShowDetailDialog(false);
+                  }}
+                >
+                  Add to Whitelist
+                </Button>
+                {!selectedDevice.is_me && (
+                  <Button
+                    variant={killStates.get(selectedDevice.mac)?.is_killed ? "outline" : "destructive"}
+                    onClick={(e) => {
+                      handleKillToggle(selectedDevice, e as unknown as React.MouseEvent);
+                    }}
+                  >
+                    {killStates.get(selectedDevice.mac)?.is_killed ? (
+                      <>
+                        <Power data-icon="inline-start" />
+                        Unkill
+                      </>
+                    ) : (
+                      <>
+                        <PowerOff data-icon="inline-start" />
+                        Kill
+                      </>
+                    )}
+                  </Button>
+                )}
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   )
 }

@@ -7,6 +7,7 @@ import { ScanControls } from "@/components/ScanControls";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { Shield, Users, Settings } from "lucide-react";
 import { useNetworkStore } from "@/stores/networkStore";
+import { ToastContainer } from "@/components/ToastContainer";
 import "./App.css";
 
 function App() {
@@ -67,6 +68,7 @@ function App() {
             <SettingsPanel />
           </TabsContent>
         </Tabs>
+        <ToastContainer />
       </main>
     </TooltipProvider>
   );

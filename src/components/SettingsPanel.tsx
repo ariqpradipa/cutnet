@@ -56,12 +56,12 @@ import {
   startDefender as ipcStartDefender,
   stopDefender as ipcStopDefender,
   getDefenderAlerts as ipcGetDefenderAlerts,
-  clearDefenderAlerts as ipcClearDefenderAlerts,
   isDefenderActive as ipcIsDefenderActive,
   addWhitelistEntry as ipcAddWhitelistEntry,
   removeWhitelistEntry as ipcRemoveWhitelistEntry,
   getWhitelistEntries as ipcGetWhitelistEntries,
   setWhitelistProtect as ipcSetWhitelistProtect,
+  onArpSpoofDetected,
 } from "@/utils/ipc";
 
 const changeMac = async (
@@ -128,14 +128,12 @@ export function SettingsPanel({ className, defaultTab = "network" }: SettingsPan
   );
   const [alertNotifications, setAlertNotifications] = useState<boolean>(true);
   const [alertLog, setAlertLog] = useState<AlertLogEntry[]>([]);
-  const [defenderActive, setDefenderActive] = useState(false);
 
   // Load defender state on mount
   useEffect(() => {
     const loadDefenderState = async () => {
       try {
         const active = await ipcIsDefenderActive();
-        setDefenderActive(active);
         setDefenderEnabled(active);
         setDefenderStatus(active ? "active" : "inactive");
         
@@ -153,6 +151,37 @@ export function SettingsPanel({ className, defaultTab = "network" }: SettingsPan
     };
     loadDefenderState();
   }, []);
+
+  // Listen to real-time ARP spoof detection events
+  useEffect(() => {
+    const unlisten = onArpSpoofDetected((event) => {
+      setAlertLog((prev) => [
+        ...prev,
+        {
+          id: event.timestamp.toString() + Math.random().toString(36).slice(2),
+          timestamp: new Date(event.timestamp * 1000),
+          attackerMac: event.attacker_mac,
+          attackerIp: event.claimed_ip,
+          type: event.alert_type,
+        },
+      ]);
+    });
+
+    return () => {
+      unlisten();
+    };
+  }, []);
+
+  // Sync currentMac and selectedInterface when activeInterface changes
+  useEffect(() => {
+    if (activeInterface) {
+      setCurrentMac(activeInterface.mac);
+      setSelectedInterface(activeInterface.name);
+      if (!originalMac) {
+        setOriginalMac(activeInterface.mac);
+      }
+    }
+  }, [activeInterface, originalMac]);
 
   // Whitelist tab state
   const [whitelist, setWhitelist] = useState<WhitelistEntry[]>([]);
@@ -294,7 +323,6 @@ export function SettingsPanel({ className, defaultTab = "network" }: SettingsPan
       }
       setDefenderEnabled(enabled);
       setDefenderStatus(enabled ? "active" : "inactive");
-      setDefenderActive(enabled);
       
       const alerts = await ipcGetDefenderAlerts();
       setAlertLog(alerts.map((a: any) => ({

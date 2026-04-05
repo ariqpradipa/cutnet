@@ -11,6 +11,7 @@ import {
   onScanProgress,
   onScanCompleted,
   onDeviceFound,
+  onDeviceLost,
 } from "@/utils/ipc"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -42,6 +43,7 @@ import {
   Loader2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useToast } from "@/hooks/useToast"
 
 export function ScanControls() {
   // Network store state
@@ -63,6 +65,7 @@ export function ScanControls() {
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [scanType, setScanType] = useState<"arp" | "ping" | null>(null)
+  const { toast } = useToast()
 
   // Load interfaces on mount
   useEffect(() => {
@@ -112,9 +115,20 @@ export function ScanControls() {
     }
   }, [])
 
+  // Listen to device lost events
+  useEffect(() => {
+    const unlisten = onDeviceLost((event) => {
+      useDeviceStore.getState().removeDevice(event.device.ip)
+    })
+
+    return () => {
+      unlisten()
+    }
+  }, [])
+
   // Listen to scan completed events
   useEffect(() => {
-    const unlisten = onScanCompleted((event) => {
+    const unlisten = onScanCompleted((_event) => {
       setScanning(false)
       setScanProgress(null)
       setScanType(null)
@@ -147,7 +161,7 @@ export function ScanControls() {
 
   const handleArpScan = useCallback(async () => {
     if (!activeInterface) {
-      setError("Please select a network interface first")
+      toast({ title: "No interface selected", description: "Please select a network interface first", variant: "destructive" });
       return
     }
 
@@ -162,15 +176,15 @@ export function ScanControls() {
       await startArpScan(activeInterface.name)
     } catch (err) {
       console.error("ARP scan failed:", err)
-      setError("ARP scan failed. Please check your network connection.")
+      toast({ title: "ARP scan failed", description: "Please check your network connection.", variant: "destructive" });
       setScanning(false)
       setScanType(null)
     }
-  }, [activeInterface, setScanning, setScanProgress])
+  }, [activeInterface, setScanning, setScanProgress, toast])
 
   const handlePingScan = useCallback(async () => {
     if (!activeInterface) {
-      setError("Please select a network interface first")
+      toast({ title: "No interface selected", description: "Please select a network interface first", variant: "destructive" });
       return
     }
 
@@ -185,11 +199,11 @@ export function ScanControls() {
       await startPingScan(activeInterface.name)
     } catch (err) {
       console.error("Ping scan failed:", err)
-      setError("Ping scan failed. Please check your network connection.")
+      toast({ title: "Ping scan failed", description: "Please check your network connection.", variant: "destructive" });
       setScanning(false)
       setScanType(null)
     }
-  }, [activeInterface, setScanning, setScanProgress])
+  }, [activeInterface, setScanning, setScanProgress, toast])
 
   const handleStopScan = useCallback(async () => {
     try {
