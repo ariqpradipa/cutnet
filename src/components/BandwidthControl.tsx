@@ -3,7 +3,6 @@
 import { useState } from "react"
 import type { Device } from "@/lib/schemas"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Dialog,
@@ -20,9 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Badge } from "@/components/ui/badge"
 import { Gauge, ArrowDown, ArrowUp, Trash2, Save } from "lucide-react"
-import { cn } from "@/lib/utils"
 
 interface BandwidthLimit {
   mac: string

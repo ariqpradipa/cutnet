@@ -3,8 +3,10 @@
 import { useState, useMemo, useCallback, useEffect } from "react"
 import { useDeviceStore } from "@/stores/deviceStore"
 import { useNetworkStore } from "@/stores/networkStore"
-import { killDevice, unkillDevice, killAllDevices, unkillAllDevices, setDeviceCustomName, getCustomDeviceNames, addWhitelistEntry } from "@/utils/ipc"
+import { killDevice, unkillDevice, killAllDevices, unkillAllDevices, setDeviceCustomName, getCustomDeviceNames, addWhitelistEntry, setBandwidthLimit, removeBandwidthLimit, getBandwidthStats } from "@/utils/ipc"
+import { BandwidthControl } from "./BandwidthControl"
 import type { Device, KillState } from "@/lib/schemas"
+import type { BandwidthLimit, BandwidthStats } from "@/utils/ipc"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -135,8 +137,17 @@ function getDeviceStatus(
 }
 
 export function DeviceTable() {
-  const { devices, selectedDevice, killStates, selectDevice, setKillState, updateDevice } =
-    useDeviceStore()
+  const { 
+    devices, 
+    selectedDevice, 
+    killStates, 
+    bandwidthLimits,
+    selectDevice, 
+    setKillState, 
+    updateDevice,
+    setBandwidthLimit: setStoreBandwidthLimit,
+    removeBandwidthLimit: removeStoreBandwidthLimit
+  } = useDeviceStore()
   const { isScanning } = useNetworkStore()
   const { toast } = useToast()
 
@@ -149,6 +160,9 @@ export function DeviceTable() {
   const [editingName, setEditingName] = useState<string | null>(null)
   const [editingValue, setEditingValue] = useState("")
   const [showKillAllConfirm, setShowKillAllConfirm] = useState(false)
+  const [showBandwidthDialog, setShowBandwidthDialog] = useState(false)
+  const [selectedBandwidthDevice, setSelectedBandwidthDevice] = useState<Device | null>(null)
+  const [bandwidthStats, setBandwidthStats] = useState<BandwidthStats | null>(null)
 
   useEffect(() => {
     const loadNames = async () => {
@@ -400,6 +414,80 @@ export function DeviceTable() {
       setEditingValue("")
     }
   }, [saveCustomName])
+
+  const handleOpenBandwidthControl = useCallback((device: Device, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setSelectedBandwidthDevice(device)
+    setBandwidthStats(null)
+    setShowBandwidthDialog(true)
+    
+    getBandwidthStats(device.mac).then(stats => {
+      setBandwidthStats(stats)
+    }).catch(() => {
+    })
+  }, [])
+
+  const handleSetBandwidthLimit = useCallback(async (mac: string, download: number | null, upload: number | null) => {
+    try {
+      await setBandwidthLimit(mac, download, upload)
+      const limit: BandwidthLimit = {
+        mac,
+        download_limit_kbps: download,
+        upload_limit_kbps: upload,
+        enabled: true
+      }
+      setStoreBandwidthLimit(mac, limit)
+      toast({
+        title: "Bandwidth limit applied",
+        description: `Speed limits set for device`,
+        variant: "default"
+      })
+    } catch (err) {
+      toast({
+        title: "Failed to apply bandwidth limit",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive"
+      })
+      throw err
+    }
+  }, [setStoreBandwidthLimit, toast])
+
+  const handleRemoveBandwidthLimit = useCallback(async (mac: string) => {
+    try {
+      await removeBandwidthLimit(mac)
+      removeStoreBandwidthLimit(mac)
+      toast({
+        title: "Bandwidth limit removed",
+        description: `Speed limits cleared for device`,
+        variant: "default"
+      })
+    } catch (err) {
+      toast({
+        title: "Failed to remove bandwidth limit",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive"
+      })
+      throw err
+    }
+  }, [removeStoreBandwidthLimit, toast])
+
+  const getDeviceBandwidthDisplay = useCallback((mac: string) => {
+    const limit = bandwidthLimits.get(mac)
+    if (!limit || !limit.enabled) return null
+    
+    const hasDownload = limit.download_limit_kbps && limit.download_limit_kbps > 0
+    const hasUpload = limit.upload_limit_kbps && limit.upload_limit_kbps > 0
+    
+    if (!hasDownload && !hasUpload) return null
+    
+    if (hasDownload && hasUpload) {
+      return `↓${limit.download_limit_kbps} ↑${limit.upload_limit_kbps} KB/s`
+    } else if (hasDownload) {
+      return `↓${limit.download_limit_kbps} KB/s`
+    } else {
+      return `↑${limit.upload_limit_kbps} KB/s`
+    }
+  }, [bandwidthLimits])
 
   return (
     <TooltipProvider>
@@ -717,15 +805,20 @@ export function DeviceTable() {
                           </div>
                         )}
                       </TableCell>
-                      <TableCell className="text-center text-muted-foreground text-xs">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="cursor-help">—</span>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>Coming Soon</p>
-                          </TooltipContent>
-                        </Tooltip>
+                      <TableCell 
+                        className="text-center text-muted-foreground text-xs cursor-pointer hover:text-foreground"
+                        onClick={(e) => handleOpenBandwidthControl(device, e)}
+                      >
+                        {getDeviceBandwidthDisplay(device.mac) || (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="cursor-help">—</span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Click to set bandwidth limit</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center justify-end gap-1">
@@ -950,6 +1043,22 @@ export function DeviceTable() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {selectedBandwidthDevice && (
+        <BandwidthControl
+          device={selectedBandwidthDevice}
+          limit={bandwidthLimits.get(selectedBandwidthDevice.mac) || null}
+          stats={bandwidthStats}
+          isOpen={showBandwidthDialog}
+          onClose={() => {
+            setShowBandwidthDialog(false)
+            setSelectedBandwidthDevice(null)
+            setBandwidthStats(null)
+          }}
+          onSetLimit={handleSetBandwidthLimit}
+          onRemoveLimit={handleRemoveBandwidthLimit}
+        />
+      )}
     </TooltipProvider>
   )
 }

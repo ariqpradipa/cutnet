@@ -1,10 +1,13 @@
 import { create } from "zustand";
 import type { Device, KillState } from "@/lib/schemas";
+import type { BandwidthLimit, BandwidthStats } from "@/utils/ipc";
 
 interface DeviceStore {
   devices: Device[];
   selectedDevice: Device | null;
   killStates: Map<string, KillState>;
+  bandwidthLimits: Map<string, BandwidthLimit>;
+  bandwidthStats: Map<string, BandwidthStats>;
 
   setDevices: (devices: Device[]) => void;
   addDevice: (device: Device) => void;
@@ -13,12 +16,18 @@ interface DeviceStore {
   selectDevice: (device: Device | null) => void;
   setKillState: (mac: string, state: KillState) => void;
   clearKillStates: () => void;
+  setBandwidthLimit: (mac: string, limit: BandwidthLimit) => void;
+  removeBandwidthLimit: (mac: string) => void;
+  setBandwidthStats: (mac: string, stats: BandwidthStats) => void;
+  clearBandwidthData: () => void;
 }
 
 export const useDeviceStore = create<DeviceStore>((set, get) => ({
   devices: [],
   selectedDevice: null,
   killStates: new Map(),
+  bandwidthLimits: new Map(),
+  bandwidthStats: new Map(),
 
   setDevices: (devices) => set({ devices }),
 
@@ -57,4 +66,27 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
   },
 
   clearKillStates: () => set({ killStates: new Map() }),
+
+  setBandwidthLimit: (mac, limit) => {
+    const bandwidthLimits = new Map(get().bandwidthLimits);
+    bandwidthLimits.set(mac, limit);
+    set({ bandwidthLimits });
+  },
+
+  removeBandwidthLimit: (mac) => {
+    const bandwidthLimits = new Map(get().bandwidthLimits);
+    bandwidthLimits.delete(mac);
+    set({ bandwidthLimits });
+  },
+
+  setBandwidthStats: (mac, stats) => {
+    const bandwidthStats = new Map(get().bandwidthStats);
+    bandwidthStats.set(mac, stats);
+    set({ bandwidthStats });
+  },
+
+  clearBandwidthData: () => set({ 
+    bandwidthLimits: new Map(),
+    bandwidthStats: new Map()
+  }),
 }));

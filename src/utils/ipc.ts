@@ -352,3 +352,40 @@ export async function setDeviceCustomName(ip: string, name: string): Promise<voi
 export async function getCustomDeviceNames(): Promise<Record<string, string>> {
   return await invoke("get_custom_device_names");
 }
+
+// Bandwidth control types
+export interface BandwidthLimit {
+  mac: string;
+  download_limit_kbps: number | null;
+  upload_limit_kbps: number | null;
+  enabled: boolean;
+}
+
+export interface BandwidthStats {
+  mac: string;
+  current_download_kbps: number;
+  current_upload_kbps: number;
+  total_download_bytes: number;
+  total_upload_bytes: number;
+}
+
+// Bandwidth control functions
+export async function setBandwidthLimit(
+  mac: string,
+  downloadKbps: number | null,
+  uploadKbps: number | null
+): Promise<void> {
+  await invoke("set_bandwidth_limit", { mac, downloadKbps, uploadKbps });
+}
+
+export async function removeBandwidthLimit(mac: string): Promise<void> {
+  await invoke("remove_bandwidth_limit", { mac });
+}
+
+export async function getBandwidthLimits(): Promise<BandwidthLimit[]> {
+  return await invoke("get_bandwidth_limits");
+}
+
+export async function getBandwidthStats(mac: string): Promise<BandwidthStats> {
+  return await invoke("get_bandwidth_stats", { mac });
+}
