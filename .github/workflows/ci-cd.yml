@@ -1,0 +1,556 @@
+# =============================================================================
+# CutNet Tauri App CI/CD Pipeline
+# =============================================================================
+# This workflow handles:
+#   - Fast feedback testing (type checking, clippy, unit tests)
+#   - Multi-platform builds (macOS, Windows, Linux)
+#   - Release automation with changelog generation
+#
+# Versioning: Uses git tags (v0.1.0) or package.json version for dev builds
+# Artifacts: Includes git commit SHA in names for traceability
+# =============================================================================
+
+name: CI/CD
+
+# =============================================================================
+# TRIGGERS
+# =============================================================================
+on:
+  # Fast feedback on all pushes to main
+  push:
+    branches: [main]
+
+  # Validate PRs before merging
+  pull_request:
+    branches: [main]
+
+  # Manual trigger for debugging or custom builds
+  workflow_dispatch:
+
+  # Release automation - triggers only on version tags
+  push:
+    tags:
+      - 'v*'
+
+# =============================================================================
+# ENVIRONMENT & CONFIGURATION
+# =============================================================================
+env:
+  # Rust toolchain
+  RUST_STABLE: stable
+  RUST_NIGHTLY: nightly
+
+  # Timeout for build jobs (prevents hung builds)
+  BUILD_TIMEOUT_MINUTES: 30
+
+  # Tauri CLI version (aligns with package.json devDependency)
+  TAURI_CLI_VERSION: "2"
+
+# =============================================================================
+# JOB DEFINITIONS
+# =============================================================================
+jobs:
+  # ---------------------------------------------------------------------------
+  # JOB 1: TEST - Fast feedback on Linux
+  # ---------------------------------------------------------------------------
+  test:
+    name: Test (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # Checkout with full history for changelog generation
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Setup Bun runtime
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Cache Bun dependencies
+      - name: Cache Bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      # Cache Rust toolchain
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Install Rust stable toolchain
+      - name: Install Rust
+        run: |
+          rustup default ${{ env.RUST_STABLE }}
+          rustup update stable
+
+      # =========================================================================
+      # TEST STEPS
+      # =========================================================================
+
+      # Step 1: TypeScript type checking
+      - name: TypeScript type check
+        run: bun run tsc --noEmit
+
+      # Step 2: Rust syntax/compilation check
+      - name: Cargo check
+        working-directory: src-tauri
+        run: cargo check
+
+      # Step 3: Rust linting (clippy for idiomatic code)
+      - name: Cargo clippy
+        working-directory: src-tauri
+        run: cargo clippy -- -D warnings
+
+      # Step 4: Rust unit tests (--lib excludes integration tests that need deps)
+      - name: Cargo test
+        working-directory: src-tauri
+        run: cargo test --lib
+
+  # ---------------------------------------------------------------------------
+  # JOB 2: BUILD - macOS
+  # ---------------------------------------------------------------------------
+  build-macos:
+    name: Build (macOS)
+    runs-on: macos-latest
+    timeout-minutes: ${{ env.BUILD_TIMEOUT_MINUTES }}
+    needs: test  # Ensures code compiles before investing in build time
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Can add multiple configurations here (e.g., different Rust versions)
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Setup Bun runtime
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Cache Bun dependencies
+      - name: Cache Bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      # Cache Rust compilation artifacts
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Install Rust stable toolchain
+      - name: Install Rust
+        run: |
+          rustup default ${{ env.RUST_STABLE }}
+          rustup update stable
+
+      # =========================================================================
+      # BUILD STEPS
+      # =========================================================================
+
+      # Build the Tauri app for macOS
+      - name: Build Tauri app
+        run: bun run tauri build
+        env:
+          # Skip code signing for CI (notarization requires Apple Developer account)
+          # To enable: Add APPLE_SIGNING_IDENTITY and APPLE_ID to repo secrets
+          TAURI_SIGNING_PRIVATE_KEY: ""
+          APPLE_SIGNING_IDENTITY: "-"
+          APPLE_ID: ""
+          APPLE_PASSWORD: ""
+          APPLE_TEAM_ID: ""
+
+      # =========================================================================
+      # ARTIFACT UPLOAD
+      # =========================================================================
+      # Upload .dmg installer
+      - name: Upload .dmg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutnet-macos-dmg-${{ github.sha }}
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+          retention-days: 30
+          compression-level: 9
+
+      # Upload .app bundle (for distribution/testing)
+      - name: Upload .app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutnet-macos-app-${{ github.sha }}
+          path: src-tauri/target/release/bundle/macos/*.app
+          retention-days: 30
+          compression-level: 9
+
+      # Upload build logs on failure
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutnet-macos-logs-${{ github.sha }}
+          path: src-tauri/target/release/build/**/*.log
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # JOB 3: BUILD - Windows
+  # ---------------------------------------------------------------------------
+  build-windows:
+    name: Build (Windows)
+    runs-on: windows-latest
+    timeout-minutes: ${{ env.BUILD_TIMEOUT_MINUTES }}
+    needs: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Setup Bun on Windows
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Cache Bun dependencies
+      - name: Cache Bun packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.LOCALAPPDATA }}\bun\cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      # Cache Rust compilation artifacts
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Install Rust stable toolchain
+      - name: Install Rust
+        run: |
+          rustup default ${{ env.RUST_STABLE }}
+          rustup update stable
+
+      # Install Visual C++ Redistributable (required for WebView2 runtime)
+      - name: Install Visual C++ Redistributable
+        run: |
+          choco install vcredist-all -y
+
+      # =========================================================================
+      # BUILD STEPS
+      # =========================================================================
+
+      - name: Build Tauri app
+        run: bun run tauri build
+        env:
+          # Skip code signing for CI
+          TAURI_SIGNING_PRIVATE_KEY: ""
+
+      # =========================================================================
+      # ARTIFACT UPLOAD
+      # =========================================================================
+      - name: Upload .msi installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutnet-windows-msi-${{ github.sha }}
+          path: src-tauri/target/release/bundle/msi/*.msi
+          retention-days: 30
+          compression-level: 9
+
+      - name: Upload .exe installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutnet-windows-exe-${{ github.sha }}
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          retention-days: 30
+          compression-level: 9
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutnet-windows-logs-${{ github.sha }}
+          path: src-tauri/target/release/build/**/*.log
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # JOB 4: BUILD - Linux
+  # ---------------------------------------------------------------------------
+  build-linux:
+    name: Build (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ env.BUILD_TIMEOUT_MINUTES }}
+    needs: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Setup Bun
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Cache Bun dependencies
+      - name: Cache Bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      # Cache Rust compilation artifacts
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Install Rust stable toolchain
+      - name: Install Rust
+        run: |
+          rustup default ${{ env.RUST_STABLE }}
+          rustup update stable
+
+      # =========================================================================
+      # LINUX BUILD DEPENDENCIES
+      # =========================================================================
+      # Required for building WebKitGTK and GTK based apps
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl3 \
+            libsecret-1-0 \
+            libglib2.0-dev \
+            libcairo2-dev \
+            libpango1.0-dev \
+            libgdk-pixbuf-2.0-dev
+
+      # =========================================================================
+      # BUILD STEPS
+      # =========================================================================
+
+      - name: Build Tauri app
+        run: bun run tauri build
+        env:
+          # Skip code signing for CI
+          TAURI_SIGNING_PRIVATE_KEY: ""
+
+      # =========================================================================
+      # ARTIFACT UPLOAD
+      # =========================================================================
+      - name: Upload .deb package
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutnet-linux-deb-${{ github.sha }}
+          path: src-tauri/target/release/bundle/deb/*.deb
+          retention-days: 30
+          compression-level: 9
+
+      - name: Upload .rpm package
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutnet-linux-rpm-${{ github.sha }}
+          path: src-tauri/target/release/bundle/rpm/*.rpm
+          retention-days: 30
+          compression-level: 9
+
+      - name: Upload .AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutnet-linux-appimage-${{ github.sha }}
+          path: src-tauri/target/release/bundle/appimage/*.AppImage
+          retention-days: 30
+          compression-level: 9
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutnet-linux-logs-${{ github.sha }}
+          path: src-tauri/target/release/build/**/*.log
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # JOB 5: RELEASE - GitHub Release with changelog
+  # ---------------------------------------------------------------------------
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only run on tag pushes, not on PR or main push
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    # Wait for all platform builds to complete
+    needs: [build-macos, build-windows, build-linux]
+
+    permissions:
+      contents: write  # Required for creating releases
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for changelog generation
+
+      # Extract version from tag (remove 'v' prefix)
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      # Generate changelog from git commits since last release
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get previous tag for changelog range
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log $PREV_TAG..HEAD --oneline --format="* %s (@%an)")
+          else
+            # First release - include all commits
+            CHANGELOG=$(git log --oneline --format="* %s (@%an)" | head -50)
+          fi
+          
+          # Create a markdown changelog
+          cat << 'CHANGELOG_EOF' > release_body.md
+          ## What's Changed
+
+          $CHANGELOG
+
+          ## Downloads
+
+          Download the appropriate installer for your platform from the assets below.
+
+          **Package**: cutnet v${{ steps.version.outputs.VERSION }}
+          **Commit**: ${{ github.sha }}
+          **Built**: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          CHANGELOG_EOF
+          
+          echo "body=$(cat release_body.md)" >> $GITHUB_OUTPUT
+
+      # Download all build artifacts
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # Rename artifacts to remove SHA suffix for cleaner release names
+      - name: Prepare release artifacts
+        run: |
+          cd artifacts
+          # Find and rename all artifacts to remove SHA suffix
+          for dir in */; do
+            if [[ "$dir" =~ -[a-f0-9]{40}/$ ]]; then
+              new_name=$(echo "$dir" | sed 's/-[a-f0-9]\{40\}\/$//')
+              mv "$dir" "../release_artifacts/$new_name" 2>/dev/null || true
+            fi
+          done
+          
+          # List all release artifacts
+          echo "=== Release Artifacts ==="
+          ls -la ../release_artifacts/ 2>/dev/null || echo "No artifacts found"
+
+      # Create the GitHub Release
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref }}
+          name: CutNet v${{ steps.version.outputs.VERSION }}
+          body_path: release_body.md
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+          generate_release_notes: false
+          artifacts: release_artifacts/*
+          artifact_errors_fail_upload: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# =============================================================================
+# NOTES & DOCUMENTATION
+# =============================================================================
+#
+# CODE SIGNING SETUP (Optional - for production releases):
+# ---------------------------------------------------
+# To enable code signing, add these secrets to your repository:
+#   - APPLE_SIGNING_IDENTITY: Developer ID Application certificate (Developer ID)
+#   - APPLE_ID: Your Apple ID email
+#   - APPLE_PASSWORD: App-specific password
+#   - APPLE_TEAM_ID: Your Apple Team ID
+#
+# For Windows code signing:
+#   - AUTHENTICODE_PASSWORD: Code signing certificate password
+#   - AUTHENTICODE_CERT: Base64 encoded code signing certificate
+#
+# LINUX APPIMAGE NOTES:
+# ---------------------------------------------------
+# AppImage requires `patchelf` which is installed via apt-get above.
+# For full AppImage support, you may also need:
+#   - libappindicator (for system tray)
+#
+# VERSIONING STRATEGY:
+# ---------------------------------------------------
+# Release versions: Create git tags like `v0.1.0`, `v1.2.3`
+#   - Triggers: release job, creates GitHub Release
+#   - Uses tag version for release name
+#
+# Dev builds (PRs, main pushes without tags):
+#   - Artifacts include git SHA for traceability
+#   - Version from package.json/tauri.conf.json
+#
+# ARTIFACT NAMING:
+# ---------------------------------------------------
+# macOS:
+#   - cutnet_0.1.0_x64.dmg (signed installer)
+#   - CutNet.app (application bundle)
+#
+# Windows:
+#   - cutnet_0.1.0_x64-setup.exe (NSIS installer)
+#   - cutnet_0.1.0_x64.msi (MSI installer)
+#
+# Linux:
+#   - cutnet_0.1.0_amd64.deb (Debian/Ubuntu)
+#   - cutnet-0.1.0-1.x86_64.rpm (Fedora/RHEL)
+#   - cutnet_0.1.0_amd64.AppImage (Universal)
+#
+# TROUBLESHOOTING:
+# ---------------------------------------------------
+# 1. macOS builds fail with "Unable to build valid archive":
+#    - Ensure code signing identity is correct
+#    - Try: security find-identity -v -p codesigning
+#
+# 2. Linux builds fail with "libwebkit2gtk-4.1-dev not found":
+#    - Update apt sources: sudo apt-get update
+#    - Check Ubuntu version - 22.04+ has webkit2gtk-4.1
+#
+# 3. Windows builds fail with "WebView2 runtime not found":
+#    - Install: choco install webview2 -y
+#    - Or ensure target machine has Edge browser installed
+#
+# 4. Clippy warnings treated as errors:
+#    - Run cargo clippy locally before pushing
+#    - Add `#![allow(clippy::some_lint)]` if intentional
+# =============================================================================
