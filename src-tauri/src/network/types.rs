@@ -203,6 +203,9 @@ pub enum NetworkError {
     #[error("Platform not supported: {0}")]
     PlatformNotSupported(String),
 
+    #[error("Bandwidth control error: {0}")]
+    BandwidthError(String),
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 }

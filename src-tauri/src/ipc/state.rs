@@ -220,13 +220,18 @@ impl Scanner {
         let interface_for_scan = interface_name.clone();
 
         tokio::spawn(async move {
-            let result = crate::network::scanner::arp_scan(&interface_for_scan).await;
-            match &result {
-                Ok(devices) => {
+            let scan_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    crate::network::scanner::arp_scan(&interface_for_scan).await
+                })
+            }));
+
+            match scan_result {
+                Ok(Ok(devices)) => {
                     let total = devices.len() as u16;
                     let mut current_ips = HashMap::new();
-                    for device in devices {
-                        current_ips.insert(device.ip.clone(), device);
+                    for device in &devices {
+                        current_ips.insert(device.ip.clone(), device.clone());
                     }
                     
                     let known_ips: Vec<String> = {
@@ -266,8 +271,12 @@ impl Scanner {
                     }
                     emit_scan_completed(&app, total, true);
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     log::error!("ARP scan failed: {}", e);
+                    emit_scan_completed(&app, 0, false);
+                }
+                Err(panic_info) => {
+                    log::error!("ARP scan panicked: {:?}", panic_info);
                     emit_scan_completed(&app, 0, false);
                 }
             }
@@ -302,13 +311,18 @@ impl Scanner {
         log::info!("Starting ping scan on interface: {}", interface_name);
 
         tokio::spawn(async move {
-            let result = crate::network::scanner::ping_scan(&interface_for_scan).await;
-            match &result {
-                Ok(devices) => {
+            let scan_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    crate::network::scanner::ping_scan(&interface_for_scan).await
+                })
+            }));
+
+            match scan_result {
+                Ok(Ok(devices)) => {
                     let total = devices.len() as u16;
                     let mut current_ips = HashMap::new();
-                    for device in devices {
-                        current_ips.insert(device.ip.clone(), device);
+                    for device in &devices {
+                        current_ips.insert(device.ip.clone(), device.clone());
                     }
                     
                     let known_ips: Vec<String> = {
@@ -348,8 +362,12 @@ impl Scanner {
                     }
                     emit_scan_completed(&app, total, true);
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     log::error!("Ping scan failed: {}", e);
+                    emit_scan_completed(&app, 0, false);
+                }
+                Err(panic_info) => {
+                    log::error!("Ping scan panicked: {:?}", panic_info);
                     emit_scan_completed(&app, 0, false);
                 }
             }
@@ -430,4 +448,32 @@ pub fn init_state() -> (KillerState, ScannerState) {
     log::info!("IPC state initialized");
 
     (killer, scanner)
+}
+
+/// Cleanup all state - called on app shutdown
+pub async fn cleanup_all_state(killer_state: &KillerState, scanner_state: &ScannerState) {
+    log::info!("Cleaning up all state...");
+
+    // Clean up killer state
+    {
+        let mut killer = killer_state.lock().await;
+        if let Err(e) = killer.unkill_all().await {
+            log::error!("Failed to unkill all devices during cleanup: {}", e);
+        }
+        killer.poisoned_devices.clear();
+        killer.interface_name = None;
+        killer.router = None;
+    }
+
+    // Clean up scanner state
+    {
+        let mut scanner = scanner_state.lock().await;
+        scanner.is_running = false;
+        scanner.discovered_devices.clear();
+        scanner.current_interface = None;
+        scanner.should_stop = true;
+        scanner.known_devices.clear();
+    }
+
+    log::info!("State cleanup completed");
 }
