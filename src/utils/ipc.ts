@@ -96,3 +96,189 @@ export function onScanProgress(
     (await unlisten)();
   };
 }
+
+// Device found event
+export interface DeviceFoundEvent {
+  device: {
+    ip: string;
+    mac: string;
+    hostname: string | null;
+    vendor: string | null;
+    is_router: boolean;
+    is_me: boolean;
+  };
+}
+
+export function onDeviceFound(
+  callback: (event: DeviceFoundEvent) => void
+): () => void {
+  const unlisten = listen<DeviceFoundEvent>("device-found", (event) => {
+    callback(event.payload);
+  });
+
+  return async () => {
+    (await unlisten)();
+  };
+}
+
+// Device lost event
+export interface DeviceLostEvent {
+  device: {
+    ip: string;
+    mac: string;
+    hostname: string | null;
+    vendor: string | null;
+    is_router: boolean;
+    is_me: boolean;
+  };
+}
+
+export function onDeviceLost(
+  callback: (event: DeviceLostEvent) => void
+): () => void {
+  const unlisten = listen<DeviceLostEvent>("device-lost", (event) => {
+    callback(event.payload);
+  });
+
+  return async () => {
+    (await unlisten)();
+  };
+}
+
+// Scan completed event
+export interface ScanCompletedEvent {
+  total_devices: number;
+  success: boolean;
+}
+
+export function onScanCompleted(
+  callback: (event: ScanCompletedEvent) => void
+): () => void {
+  const unlisten = listen<ScanCompletedEvent>("scan-completed", (event) => {
+    callback(event.payload);
+  });
+
+  return async () => {
+    (await unlisten)();
+  };
+}
+
+// Device killed event
+export interface DeviceKilledEvent {
+  ip: string;
+  mac: string;
+}
+
+export function onDeviceKilled(
+  callback: (event: DeviceKilledEvent) => void
+): () => void {
+  const unlisten = listen<DeviceKilledEvent>("device-killed", (event) => {
+    callback(event.payload);
+  });
+
+  return async () => {
+    (await unlisten)();
+  };
+}
+
+// Device restored event
+export interface DeviceRestoredEvent {
+  ip: string;
+  mac: string;
+}
+
+export function onDeviceRestored(
+  callback: (event: DeviceRestoredEvent) => void
+): () => void {
+  const unlisten = listen<DeviceRestoredEvent>("device-restored", (event) => {
+    callback(event.payload);
+  });
+
+  return async () => {
+    (await unlisten)();
+  };
+}
+
+// Error event
+export interface IpcErrorEvent {
+  message: string;
+  code: string | null;
+}
+
+export function onError(
+  callback: (event: IpcErrorEvent) => void
+): () => void {
+  const unlisten = listen<IpcErrorEvent>("error", (event) => {
+    callback(event.payload);
+  });
+
+  return async () => {
+    (await unlisten)();
+  };
+}
+
+// Defender events
+export interface ArpSpoofDetectedEvent {
+  timestamp: number;
+  claimed_ip: string;
+  legitimate_mac: string;
+  attacker_mac: string;
+  alert_type: string;
+}
+
+export function onArpSpoofDetected(
+  callback: (event: ArpSpoofDetectedEvent) => void
+): () => void {
+  const unlisten = listen<ArpSpoofDetectedEvent>("arp-spoof-detected", (event) => {
+    callback(event.payload);
+  });
+
+  return async () => {
+    (await unlisten)();
+  };
+}
+
+// New IPC commands for defender/whitelist/arp-flush
+export async function startDefender(): Promise<void> {
+  await invoke("start_defender");
+}
+
+export async function stopDefender(): Promise<void> {
+  await invoke("stop_defender");
+}
+
+export async function getDefenderAlerts(): Promise<any[]> {
+  return await invoke("get_defender_alerts");
+}
+
+export async function clearDefenderAlerts(): Promise<void> {
+  await invoke("clear_defender_alerts");
+}
+
+export async function isDefenderActive(): Promise<boolean> {
+  return await invoke("is_defender_active");
+}
+
+export async function addWhitelistEntry(mac: string, label?: string): Promise<void> {
+  await invoke("add_whitelist_entry", { mac, label });
+}
+
+export async function removeWhitelistEntry(mac: string): Promise<boolean> {
+  return await invoke("remove_whitelist_entry", { mac });
+}
+
+export async function getWhitelistEntries(): Promise<any[]> {
+  return await invoke("get_whitelist_entries");
+}
+
+export async function setWhitelistProtect(enabled: boolean): Promise<void> {
+  await invoke("set_whitelist_protect", { enabled });
+}
+
+export async function isWhitelisted(mac: string): Promise<boolean> {
+  return await invoke("is_whitelisted", { mac });
+}
+
+export async function flushArpCache(): Promise<void> {
+  await invoke("flush_arp_cache_cmd");
+}
