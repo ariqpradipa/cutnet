@@ -14,6 +14,7 @@ use crate::network::types::{Device, NetworkError, Result};
 use crate::network::utils::{format_mac, generate_network_range, mac_to_vendor};
 
 const ARP_TIMEOUT_MS: u64 = 2000;
+#[allow(dead_code)]
 const PING_TIMEOUT_SECS: u64 = 2;
 const SCAN_CONCURRENCY: usize = 50;
 
@@ -335,24 +336,17 @@ pub fn get_current_interface() -> Result<crate::network::types::NetworkInterface
     to_network_interface(&interface)
 }
 
+#[allow(dead_code)]
 pub fn get_all_interfaces() -> Result<Vec<crate::network::types::NetworkInterface>> {
     let interfaces = pnet_datalink::interfaces();
-
     interfaces
-        .into_iter()
-        .filter(|iface| iface.is_up() && !iface.is_loopback())
+        .iter()
         .filter(|iface| iface.ips.iter().any(|ip| ip.is_ipv4()))
-        .map(|iface| to_network_interface(&iface))
+        .map(|iface| to_network_interface(iface))
         .collect()
 }
 
 fn to_network_interface(iface: &NetworkInterface) -> Result<crate::network::types::NetworkInterface> {
-    let ip = iface
-        .ips
-        .iter()
-        .find(|ip| ip.is_ipv4())
-        .ok_or_else(|| NetworkError::InterfaceNotFound("No IPv4 address".to_string()))?;
-
     let ip = iface.ips.iter().find(|ip| ip.is_ipv4()).ok_or_else(|| {
         NetworkError::MacAddressError("No IPv4 address found".to_string())
     })?;
@@ -360,7 +354,7 @@ fn to_network_interface(iface: &NetworkInterface) -> Result<crate::network::type
         .mac
         .ok_or_else(|| NetworkError::MacAddressError("No MAC address".to_string()))?;
     
-    let (broadcast, netmask, ip_addr, prefix) = {
+    let (broadcast, netmask, ip_addr) = {
         let addr = if let std::net::IpAddr::V4(addr) = ip.ip() {
             addr
         } else {
@@ -386,7 +380,7 @@ fn to_network_interface(iface: &NetworkInterface) -> Result<crate::network::type
             .unwrap();
         let broadcast = std::net::Ipv4Addr::from(broadcast_octets);
         
-        (broadcast.to_string(), netmask.to_string(), addr, prefix)
+        (broadcast.to_string(), netmask.to_string(), addr)
     };
 
     Ok(crate::network::types::NetworkInterface::new(

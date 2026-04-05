@@ -37,7 +37,6 @@ pub async fn start_poisoning(
     }
 
     let (tx, _rx) = broadcast::channel(1);
-    let stop_signal = tx.clone();
 
     let handle = tokio::spawn(poisoning_loop(
         target.clone(),
@@ -169,8 +168,7 @@ async fn poison_target(
         router_ip,
     )?;
 
-    tx.send_to(&packet, Some(interface.clone()))
-        .ok_or_else(|| NetworkError::PacketSendError("Failed to send packet to victim".into()))?;
+    let _ = tx.send_to(&packet, Some(interface.clone()));
 
     Ok(())
 }
@@ -201,8 +199,7 @@ async fn poison_router(
         router_ip,
     )?;
 
-    tx.send_to(&packet, Some(interface.clone()))
-        .ok_or_else(|| NetworkError::PacketSendError("Failed to send packet to router".into()))?;
+    let _ = tx.send_to(&packet, Some(interface.clone()));
 
     Ok(())
 }
@@ -276,8 +273,7 @@ async fn send_restore_packets(
             target_ip,
         )?;
 
-        tx.send_to(&packet1, Some(interface.clone()))
-            .ok_or_else(|| NetworkError::PacketSendError("Failed to send packet to victim".into()))?;
+        let _ = tx.send_to(&packet1, Some(interface.clone()));
 
         let packet2 = build_arp_reply(
             &interface,
@@ -288,8 +284,7 @@ async fn send_restore_packets(
             router_ip,
         )?;
 
-        tx.send_to(&packet2, Some(interface.clone()))
-            .ok_or_else(|| NetworkError::PacketSendError("Failed to send packet to router".into()))?;
+        let _ = tx.send_to(&packet2, Some(interface.clone()));
 
         tokio::time::sleep(Duration::from_millis(config.restore_interval_ms)).await;
     }
@@ -330,8 +325,7 @@ pub async fn poison_once(
         target_ip_addr,
     )?;
 
-    tx.send_to(&packet, Some(interface.clone()))
-        .ok_or_else(|| NetworkError::PacketSendError("Failed to send ARP reply".into()))?;
+    let _ = tx.send_to(&packet, Some(interface.clone()));
 
     Ok(())
 }

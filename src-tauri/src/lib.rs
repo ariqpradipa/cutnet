@@ -6,7 +6,7 @@ mod ipc;
 mod network;
 
 use ipc::commands::*;
-use ipc::state::{init_state, KillerState, ScannerState};
+use ipc::state::init_state;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

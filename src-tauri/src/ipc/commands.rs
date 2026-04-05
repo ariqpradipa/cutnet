@@ -446,6 +446,7 @@ async fn get_os_version() -> Result<String, String> {
 pub async fn start_defender(app: AppHandle) -> Result<(), String> {
     let interface = crate::network::get_current_interface().map_err(|e| e.to_string())?;
     crate::network::defender::start_defender_monitoring(&interface.name, &app)
+        .await
         .map_err(|e| e.to_string())
 }
 

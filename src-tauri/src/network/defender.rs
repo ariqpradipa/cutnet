@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use once_cell::sync::Lazy;
@@ -49,7 +48,7 @@ pub struct DefenderAlertEvent {
     pub alert_type: String,
 }
 
-pub fn start_defender_monitoring(interface_name: &str, app: &AppHandle) -> Result<(), crate::network::NetworkError> {
+pub async fn start_defender_monitoring(interface_name: &str, app: &AppHandle) -> Result<(), crate::network::NetworkError> {
     let interface_name = interface_name.to_string();
     let app = app.clone();
     
@@ -57,13 +56,10 @@ pub fn start_defender_monitoring(interface_name: &str, app: &AppHandle) -> Resul
         defender_monitor_loop(interface_name, app).await;
     });
     
-    let rt = tokio::runtime::Handle::current();
-    rt.block_on(async {
-        let mut state = DEFENDER_STATE.write().await;
-        state.is_active = true;
-        let mut handle_opt = DEFENDER_HANDLE.lock().await;
-        *handle_opt = Some(handle);
-    });
+    let mut state = DEFENDER_STATE.write().await;
+    state.is_active = true;
+    let mut handle_opt = DEFENDER_HANDLE.lock().await;
+    *handle_opt = Some(handle);
     
     Ok(())
 }
