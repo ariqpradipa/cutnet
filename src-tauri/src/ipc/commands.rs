@@ -200,7 +200,7 @@ pub async fn unkill_device(
     mac: String,
     killer: State<'_, KillerState>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> ApiResult<()> {
     log::info!("Restoring device: {} ({})", ip, mac);
 
     let mut killer_lock = killer.lock().await;
@@ -213,7 +213,7 @@ pub async fn unkill_device(
         }
         Err(e) => {
             log::error!("Failed to restore device: {}", e);
-            Err(e.to_string())
+            Err(map_error(e))
         }
     }
 }
@@ -224,7 +224,7 @@ pub async fn kill_all_devices(
     devices: Vec<DeviceTarget>,
     killer: State<'_, KillerState>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> ApiResult<()> {
     log::info!("Killing {} devices", devices.len());
 
     let mut killer_lock = killer.lock().await;
@@ -249,7 +249,7 @@ pub async fn kill_all_devices(
 pub async fn unkill_all_devices(
     killer: State<'_, KillerState>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> ApiResult<()> {
     log::info!("Restoring all devices");
 
     let mut killer_lock = killer.lock().await;
@@ -264,7 +264,7 @@ pub async fn unkill_all_devices(
         }
         Err(e) => {
             log::error!("Failed to restore all devices: {}", e);
-            Err(e.to_string())
+            Err(map_error(e))
         }
     }
 }
@@ -577,7 +577,7 @@ pub async fn remove_bandwidth_limit(mac: String) -> Result<(), String> {
 /// Get all bandwidth limits
 #[tauri::command]
 pub async fn get_bandwidth_limits() -> Result<Vec<crate::network::bandwidth::BandwidthLimit>, String> {
-    let controller = crate::network::get_bandwidth_controller();
+    let controller = crate::network::get_bandwidth_controller().await;
 
     if let Some(ctrl) = controller {
         Ok(ctrl.get_limits().await)
@@ -589,7 +589,7 @@ pub async fn get_bandwidth_limits() -> Result<Vec<crate::network::bandwidth::Ban
 /// Get bandwidth statistics for a device
 #[tauri::command]
 pub async fn get_bandwidth_stats(mac: String) -> Result<crate::network::bandwidth::BandwidthStats, String> {
-    let controller = crate::network::get_bandwidth_controller()
+    let controller = crate::network::get_bandwidth_controller().await
         .ok_or("Bandwidth controller not initialized")?;
 
     controller.get_stats(&mac).await.map_err(|e| e.to_string())

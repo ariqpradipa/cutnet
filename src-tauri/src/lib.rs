@@ -37,13 +37,13 @@ pub fn run() {
             });
 
             // Load and apply saved bandwidth limits on startup
-            let handle_clone = app.handle().clone();
+            let _handle_clone = app.handle().clone();
             tokio::spawn(async move {
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 
                 if let Ok(interface) = network::get_current_interface() {
                     log::info!("Initializing bandwidth controller for interface: {}", interface.name);
-                    network::init_bandwidth_controller(&interface.name);
+                    network::init_bandwidth_controller(&interface.name).await;
                     
                     if let Err(e) = network::apply_saved_limits().await {
                         log::error!("Failed to apply saved bandwidth limits: {}", e);

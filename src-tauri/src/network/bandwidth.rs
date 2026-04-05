@@ -765,27 +765,27 @@ impl BandwidthController {
 
 /// Global bandwidth controller instance
 use once_cell::sync::Lazy;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 
 static BANDWIDTH_CONTROLLER: Lazy<Mutex<Option<Arc<BandwidthController>>>> = 
     Lazy::new(|| Mutex::new(None));
 
 /// Initialize the global bandwidth controller
-pub fn init_bandwidth_controller(interface: impl Into<String>) -> Arc<BandwidthController> {
+pub async fn init_bandwidth_controller(interface: impl Into<String>) -> Arc<BandwidthController> {
     let controller = Arc::new(BandwidthController::new(interface));
-    let mut global = BANDWIDTH_CONTROLLER.lock().unwrap();
+    let mut global = BANDWIDTH_CONTROLLER.lock().await;
     *global = Some(controller.clone());
     controller
 }
 
 /// Get the global bandwidth controller
-pub fn get_bandwidth_controller() -> Option<Arc<BandwidthController>> {
-    BANDWIDTH_CONTROLLER.lock().unwrap().clone()
+pub async fn get_bandwidth_controller() -> Option<Arc<BandwidthController>> {
+    BANDWIDTH_CONTROLLER.lock().await.clone()
 }
 
 /// Shutdown the bandwidth controller and remove all limits
 pub async fn shutdown_bandwidth_controller() -> Result<(), BandwidthError> {
-    if let Some(controller) = get_bandwidth_controller() {
+    if let Some(controller) = get_bandwidth_controller().await {
         controller.remove_all_limits().await?;
     }
     Ok(())

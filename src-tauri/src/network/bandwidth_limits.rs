@@ -3,9 +3,8 @@
 //! This module handles persistence of bandwidth limits to disk,
 //! loading them on startup, and applying them to devices.
 
-use super::bandwidth::{BandwidthLimit, BandwidthController};
 use super::bandwidth::get_bandwidth_controller;
-use std::collections::HashMap;
+use super::bandwidth::BandwidthLimit;
 use std::path::PathBuf;
 use tokio::fs;
 
@@ -60,7 +59,7 @@ pub async fn apply_saved_limits() -> Result<(), Box<dyn std::error::Error + Send
         return Ok(());
     }
 
-    let controller = get_bandwidth_controller();
+    let controller = get_bandwidth_controller().await;
     
     if let Some(ctrl) = controller {
         for limit in limits {
@@ -88,7 +87,7 @@ pub async fn apply_saved_limits() -> Result<(), Box<dyn std::error::Error + Send
 
 /// Save current limits from the bandwidth controller
 pub async fn persist_current_limits() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let controller = get_bandwidth_controller();
+    let controller = get_bandwidth_controller().await;
     
     if let Some(ctrl) = controller {
         let limits = ctrl.get_limits().await;
@@ -104,7 +103,7 @@ pub async fn add_limit_and_persist(
     download_kbps: Option<u32>,
     upload_kbps: Option<u32>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let controller = get_bandwidth_controller();
+    let controller = get_bandwidth_controller().await;
     
     if let Some(ctrl) = controller {
         ctrl.set_limit(mac, download_kbps, upload_kbps).await
@@ -124,7 +123,7 @@ pub async fn add_limit_and_persist(
 
 /// Remove a limit and persist the change
 pub async fn remove_limit_and_persist(mac: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let controller = get_bandwidth_controller();
+    let controller = get_bandwidth_controller().await;
     
     if let Some(ctrl) = controller {
         ctrl.remove_limit(mac).await
@@ -149,7 +148,7 @@ pub async fn get_persisted_limits() -> Result<Vec<BandwidthLimit>, Box<dyn std::
 
 /// Clear all limits and remove persistence
 pub async fn clear_all_limits() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let controller = get_bandwidth_controller();
+    let controller = get_bandwidth_controller().await;
     
     if let Some(ctrl) = controller {
         ctrl.remove_all_limits().await

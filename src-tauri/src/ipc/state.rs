@@ -224,10 +224,29 @@ impl Scanner {
         let interface_for_scan = interface_name.clone();
 
         tokio::spawn(async move {
+            // Spawn the scan task and wrap in catch_unwind to handle panics
+            let scan_future = tokio::spawn(async move {
+                crate::network::scanner::arp_scan(&interface_for_scan).await
+            });
+
+            // Handle join result (task completed or panicked)
+            let scan_result = match scan_future.await {
+                Ok(result) => Ok(result),
+                Err(join_err) => {
+                    if let Ok(panic_info) = join_err.try_into_panic() {
+                        // Propagate the panic to be caught by catch_unwind
+                        std::panic::resume_unwind(panic_info);
+                    }
+                    panic!("Spawn failed without panic")
+                }
+            };
+
+            // Wrap in catch_unwind to catch any panics from the spawn
             let scan_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    crate::network::scanner::arp_scan(&interface_for_scan).await
-                })
+                match scan_result {
+                    Ok(result) => result,
+                    Err(_) => panic!("Spawn panicked"),
+                }
             }));
 
             match scan_result {
@@ -315,10 +334,29 @@ impl Scanner {
         log::info!("Starting ping scan on interface: {}", interface_name);
 
         tokio::spawn(async move {
+            // Spawn the scan task and wrap in catch_unwind to handle panics
+            let scan_future = tokio::spawn(async move {
+                crate::network::scanner::ping_scan(&interface_for_scan).await
+            });
+
+            // Handle join result (task completed or panicked)
+            let scan_result = match scan_future.await {
+                Ok(result) => Ok(result),
+                Err(join_err) => {
+                    if let Ok(panic_info) = join_err.try_into_panic() {
+                        // Propagate the panic to be caught by catch_unwind
+                        std::panic::resume_unwind(panic_info);
+                    }
+                    panic!("Spawn failed without panic")
+                }
+            };
+
+            // Wrap in catch_unwind to catch any panics from the spawn
             let scan_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    crate::network::scanner::ping_scan(&interface_for_scan).await
-                })
+                match scan_result {
+                    Ok(result) => result,
+                    Err(_) => panic!("Spawn panicked"),
+                }
             }));
 
             match scan_result {

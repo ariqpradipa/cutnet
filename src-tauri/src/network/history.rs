@@ -46,7 +46,7 @@ pub struct HistoryManager {
 
 impl HistoryManager {
     fn new() -> Self {
-        let config_path = std::env::home_dir()
+        let config_path = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".cutnet");
 
