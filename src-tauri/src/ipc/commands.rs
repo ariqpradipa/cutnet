@@ -553,3 +553,79 @@ async fn get_os_version() -> Result<String, String> {
         Ok("Unknown".to_string())
     }
 }
+
+/// Start ARP Defender monitoring
+#[tauri::command]
+pub async fn start_defender(app: AppHandle) -> Result<(), String> {
+    let interface = crate::network::get_current_interface().map_err(|e| e.to_string())?;
+    crate::network::defender::start_defender_monitoring(&interface.name, &app)
+        .map_err(|e| e.to_string())
+}
+
+/// Stop ARP Defender monitoring
+#[tauri::command]
+pub async fn stop_defender() -> Result<(), String> {
+    crate::network::defender::stop_defender_monitoring()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Get ARP Defender alerts
+#[tauri::command]
+pub async fn get_defender_alerts() -> Result<Vec<crate::network::defender::SpoofAlert>, String> {
+    Ok(crate::network::defender::get_defender_alerts().await)
+}
+
+/// Clear ARP Defender alerts
+#[tauri::command]
+pub async fn clear_defender_alerts() -> Result<(), String> {
+    crate::network::defender::clear_defender_alerts().await;
+    Ok(())
+}
+
+/// Check if defender is active
+#[tauri::command]
+pub async fn is_defender_active() -> Result<bool, String> {
+    Ok(crate::network::defender::is_defender_active().await)
+}
+
+/// Add MAC to whitelist
+#[tauri::command]
+pub async fn add_whitelist_entry(mac: String, label: Option<String>) -> Result<(), String> {
+    crate::network::whitelist::add_entry(mac, label)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Remove MAC from whitelist
+#[tauri::command]
+pub async fn remove_whitelist_entry(mac: String) -> Result<bool, String> {
+    Ok(crate::network::whitelist::remove_entry(&mac).await)
+}
+
+/// Get whitelist entries
+#[tauri::command]
+pub async fn get_whitelist_entries() -> Result<Vec<crate::network::whitelist::WhitelistEntry>, String> {
+    Ok(crate::network::whitelist::get_entries().await)
+}
+
+/// Set whitelist protection
+#[tauri::command]
+pub async fn set_whitelist_protect(enabled: bool) -> Result<(), String> {
+    crate::network::whitelist::set_protect_enabled(enabled)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Check if MAC is whitelisted
+#[tauri::command]
+pub async fn is_whitelisted(mac: String) -> Result<bool, String> {
+    Ok(crate::network::whitelist::is_whitelisted(&mac).await)
+}
+
+/// Flush ARP cache
+#[tauri::command]
+pub async fn flush_arp_cache_cmd() -> Result<(), String> {
+    crate::network::utils::flush_arp_cache()
+        .map_err(|e| e.to_string())
+}
