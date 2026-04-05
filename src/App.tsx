@@ -1,9 +1,15 @@
+import { useState } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DeviceTable } from "@/components/DeviceTable";
 import { ScanControls } from "@/components/ScanControls";
+import { SettingsPanel } from "@/components/SettingsPanel";
+import { Shield, Users, Settings } from "lucide-react";
 import "./App.css";
 
 function App() {
+  const [activeTab, setActiveTab] = useState("devices");
+
   return (
     <TooltipProvider>
       <main className="container mx-auto p-6 min-h-screen bg-background">
@@ -14,10 +20,35 @@ function App() {
           </p>
         </header>
 
-        <div className="grid gap-6">
-          <ScanControls />
-          <DeviceTable />
-        </div>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full grid-cols-3 mb-6">
+            <TabsTrigger value="devices" className="flex items-center gap-2">
+              <Users className="size-4" />
+              Devices
+            </TabsTrigger>
+            <TabsTrigger value="defender" className="flex items-center gap-2">
+              <Shield className="size-4" />
+              Defender
+            </TabsTrigger>
+            <TabsTrigger value="settings" className="flex items-center gap-2">
+              <Settings className="size-4" />
+              Settings
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="devices" className="space-y-6">
+            <ScanControls />
+            <DeviceTable />
+          </TabsContent>
+
+          <TabsContent value="defender" className="space-y-6">
+            <SettingsPanel defaultTab="defender" />
+          </TabsContent>
+
+          <TabsContent value="settings" className="space-y-6">
+            <SettingsPanel />
+          </TabsContent>
+        </Tabs>
       </main>
     </TooltipProvider>
   );
