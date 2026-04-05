@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import {
   Tabs,
   TabsContent,
@@ -50,26 +50,30 @@ import {
   ShieldOff,
 } from "lucide-react";
 import { useNetworkStore } from "@/stores/networkStore";
+import {
+  setMacAddress as ipcSetMacAddress,
+  flushArpCache as ipcFlushArpCache,
+  startDefender as ipcStartDefender,
+  stopDefender as ipcStopDefender,
+  getDefenderAlerts as ipcGetDefenderAlerts,
+  clearDefenderAlerts as ipcClearDefenderAlerts,
+  isDefenderActive as ipcIsDefenderActive,
+  addWhitelistEntry as ipcAddWhitelistEntry,
+  removeWhitelistEntry as ipcRemoveWhitelistEntry,
+  getWhitelistEntries as ipcGetWhitelistEntries,
+  setWhitelistProtect as ipcSetWhitelistProtect,
+} from "@/utils/ipc";
 
-// IPC stubs for future implementation
 const changeMac = async (
-  _interface: string,
-  _mac: string
+  interfaceName: string,
+  newMac: string
 ): Promise<{ success: boolean; error?: string }> => {
-  return { success: true };
-};
-
-const flushArpCache = async (): Promise<{
-  success: boolean;
-  error?: string;
-}> => {
-  return { success: true };
-};
-
-const toggleDefender = async (
-  _enabled: boolean
-): Promise<{ success: boolean; error?: string }> => {
-  return { success: true };
+  try {
+    await ipcSetMacAddress(interfaceName, newMac);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Failed to change MAC address" };
+  }
 };
 
 // MAC address validation regex
@@ -91,9 +95,10 @@ interface WhitelistEntry {
 
 interface SettingsPanelProps {
   className?: string;
+  defaultTab?: "network" | "mac" | "defender" | "whitelist" | "about";
 }
 
-export function SettingsPanel({ className }: SettingsPanelProps) {
+export function SettingsPanel({ className, defaultTab = "network" }: SettingsPanelProps) {
   const { interfaces, activeInterface, setActiveInterface } = useNetworkStore();
 
   // Network tab state
@@ -122,39 +127,56 @@ export function SettingsPanel({ className }: SettingsPanelProps) {
     "inactive"
   );
   const [alertNotifications, setAlertNotifications] = useState<boolean>(true);
-  const [alertLog] = useState<AlertLogEntry[]>([
-    {
-      id: "1",
-      timestamp: new Date(Date.now() - 1000 * 60 * 5),
-      attackerMac: "AA:BB:CC:DD:EE:01",
-      attackerIp: "192.168.1.100",
-      type: "ARP Spoofing",
-    },
-    {
-      id: "2",
-      timestamp: new Date(Date.now() - 1000 * 60 * 30),
-      attackerMac: "AA:BB:CC:DD:EE:02",
-      attackerIp: "192.168.1.101",
-      type: "ARP Spoofing",
-    },
-    {
-      id: "3",
-      timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2),
-      attackerMac: "AA:BB:CC:DD:EE:03",
-      attackerIp: "192.168.1.102",
-      type: "ARP Spoofing",
-    },
-  ]);
+  const [alertLog, setAlertLog] = useState<AlertLogEntry[]>([]);
+  const [defenderActive, setDefenderActive] = useState(false);
+
+  // Load defender state on mount
+  useEffect(() => {
+    const loadDefenderState = async () => {
+      try {
+        const active = await ipcIsDefenderActive();
+        setDefenderActive(active);
+        setDefenderEnabled(active);
+        setDefenderStatus(active ? "active" : "inactive");
+        
+        const alerts = await ipcGetDefenderAlerts();
+        setAlertLog(alerts.map((a: any) => ({
+          id: a.timestamp.toString(),
+          timestamp: new Date(a.timestamp * 1000),
+          attackerMac: a.attacker_mac,
+          attackerIp: a.claimed_ip,
+          type: a.alert_type,
+        })));
+      } catch (err) {
+        console.error("Failed to load defender state:", err);
+      }
+    };
+    loadDefenderState();
+  }, []);
 
   // Whitelist tab state
-  const [whitelist, setWhitelist] = useState<WhitelistEntry[]>([
-    { id: "1", mac: "AA:BB:CC:DD:EE:FF", label: "Router" },
-    { id: "2", mac: "11:22:33:44:55:66", label: "My Phone" },
-  ]);
+  const [whitelist, setWhitelist] = useState<WhitelistEntry[]>([]);
   const [newWhitelistMac, setNewWhitelistMac] = useState<string>("");
   const [newWhitelistLabel, setNewWhitelistLabel] = useState<string>("");
   const [protectWhitelisted, setProtectWhitelisted] = useState<boolean>(true);
   const [whitelistError, setWhitelistError] = useState<string | null>(null);
+
+  // Load whitelist on mount
+  useEffect(() => {
+    const loadWhitelist = async () => {
+      try {
+        const entries = await ipcGetWhitelistEntries();
+        setWhitelist(entries.map((e: any) => ({
+          id: e.mac,
+          mac: e.mac,
+          label: e.label,
+        })));
+      } catch (err) {
+        console.error("Failed to load whitelist:", err);
+      }
+    };
+    loadWhitelist();
+  }, []);
 
   // About tab state
   const [isCheckingUpdates, setIsCheckingUpdates] = useState<boolean>(false);
@@ -254,10 +276,7 @@ export function SettingsPanel({ className }: SettingsPanelProps) {
   const handleFlushArp = useCallback(async () => {
     setIsFlushingArp(true);
     try {
-      const result = await flushArpCache();
-      if (!result.success) {
-        console.error("Failed to flush ARP cache:", result.error);
-      }
+      await ipcFlushArpCache();
     } catch (err) {
       console.error("Error flushing ARP cache:", err);
     } finally {
@@ -268,43 +287,74 @@ export function SettingsPanel({ className }: SettingsPanelProps) {
   // Handle defender toggle
   const handleDefenderToggle = useCallback(async (enabled: boolean) => {
     try {
-      const result = await toggleDefender(enabled);
-      if (result.success) {
-        setDefenderEnabled(enabled);
-        setDefenderStatus(enabled ? "active" : "inactive");
+      if (enabled) {
+        await ipcStartDefender();
+      } else {
+        await ipcStopDefender();
       }
+      setDefenderEnabled(enabled);
+      setDefenderStatus(enabled ? "active" : "inactive");
+      setDefenderActive(enabled);
+      
+      const alerts = await ipcGetDefenderAlerts();
+      setAlertLog(alerts.map((a: any) => ({
+        id: a.timestamp.toString(),
+        timestamp: new Date(a.timestamp * 1000),
+        attackerMac: a.attacker_mac,
+        attackerIp: a.claimed_ip,
+        type: a.alert_type,
+      })));
     } catch (err) {
       console.error("Error toggling defender:", err);
     }
   }, []);
 
   // Handle add to whitelist
-  const handleAddToWhitelist = useCallback(() => {
+  const handleAddToWhitelist = useCallback(async () => {
     if (!validateMac(newWhitelistMac)) {
       setWhitelistError("Invalid MAC address format");
       return;
     }
 
-    if (whitelist.some((entry) => entry.mac === newWhitelistMac)) {
-      setWhitelistError("MAC address already in whitelist");
-      return;
+    try {
+      await ipcAddWhitelistEntry(newWhitelistMac, newWhitelistLabel || undefined);
+      const entries = await ipcGetWhitelistEntries();
+      setWhitelist(entries.map((e: any) => ({
+        id: e.mac,
+        mac: e.mac,
+        label: e.label,
+      })));
+      setNewWhitelistMac("");
+      setNewWhitelistLabel("");
+      setWhitelistError(null);
+    } catch (err) {
+      setWhitelistError(err instanceof Error ? err.message : "Failed to add to whitelist");
     }
-
-    const newEntry: WhitelistEntry = {
-      id: Date.now().toString(),
-      mac: newWhitelistMac,
-      label: newWhitelistLabel || undefined,
-    };
-
-    setWhitelist((prev) => [...prev, newEntry]);
-    setNewWhitelistMac("");
-    setNewWhitelistLabel("");
-    setWhitelistError(null);
-  }, [newWhitelistMac, newWhitelistLabel, whitelist, validateMac]);
+  }, [newWhitelistMac, newWhitelistLabel, validateMac]);
 
   // Handle remove from whitelist
-  const handleRemoveFromWhitelist = useCallback((id: string) => {
-    setWhitelist((prev) => prev.filter((entry) => entry.id !== id));
+  const handleRemoveFromWhitelist = useCallback(async (id: string) => {
+    try {
+      await ipcRemoveWhitelistEntry(id);
+      const entries = await ipcGetWhitelistEntries();
+      setWhitelist(entries.map((e: any) => ({
+        id: e.mac,
+        mac: e.mac,
+        label: e.label,
+      })));
+    } catch (err) {
+      console.error("Failed to remove from whitelist:", err);
+    }
+  }, []);
+
+  // Handle protect whitelisted toggle
+  const handleProtectWhitelistedChange = useCallback(async (enabled: boolean) => {
+    try {
+      await ipcSetWhitelistProtect(enabled);
+      setProtectWhitelisted(enabled);
+    } catch (err) {
+      console.error("Failed to set whitelist protect:", err);
+    }
   }, []);
 
   // Handle check for updates
@@ -340,7 +390,7 @@ export function SettingsPanel({ className }: SettingsPanelProps) {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Tabs defaultValue="network" className="w-full">
+        <Tabs defaultValue={defaultTab} className="w-full">
           <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="network" className="flex items-center gap-1.5">
               <Wifi className="size-3.5" />
@@ -725,7 +775,7 @@ export function SettingsPanel({ className }: SettingsPanelProps) {
                 <Switch
                   id="protect-whitelisted"
                   checked={protectWhitelisted}
-                  onCheckedChange={setProtectWhitelisted}
+                  onCheckedChange={handleProtectWhitelistedChange}
                 />
               </div>
 
