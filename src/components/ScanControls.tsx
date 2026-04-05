@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { useNetworkStore } from "@/stores/networkStore"
+import { useNetworkStore, markAppRunning } from "@/stores/networkStore"
 import { useDeviceStore } from "@/stores/deviceStore"
 import {
   getInterfaces,
@@ -71,6 +71,9 @@ export function ScanControls() {
         // Set first interface as active if none selected
         if (ifaces.length > 0 && !activeInterface) {
           setActiveInterface(ifaces[0])
+        }
+        if (ifaces.length > 0) {
+          markAppRunning();
         }
       } catch (err) {
         console.error("Failed to load interfaces:", err)
