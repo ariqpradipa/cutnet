@@ -7,6 +7,7 @@ use pnet_packet::ethernet::{EtherTypes, MutableEthernetPacket};
 use tokio::sync::{broadcast, Mutex, RwLock};
 use tokio::task::JoinHandle;
 
+use crate::network::poison_state::{add_poisoning_target, remove_poisoning_target};
 use crate::network::types::{Device, NetworkError, PoisoningConfig, PoisoningState, Result};
 
 static POISONING_STATE: once_cell::sync::Lazy<RwLock<HashMap<String, PoisoningState>>> =
@@ -35,6 +36,8 @@ pub async fn start_poisoning(
         let mut state = POISONING_STATE.write().await;
         state.insert(state_key.clone(), PoisoningState::Active);
     }
+
+    let _ = add_poisoning_target(&target, &router, interface_name).await;
 
     let (tx, _rx) = broadcast::channel(1);
 
@@ -81,8 +84,10 @@ pub async fn stop_poisoning(target: Device, router: Device, interface_name: &str
 
     {
         let mut state = POISONING_STATE.write().await;
-        state.insert(state_key, PoisoningState::Idle);
+        state.insert(state_key.clone(), PoisoningState::Idle);
     }
+
+    let _ = remove_poisoning_target(&target.ip, &router.ip).await;
 
     Ok(())
 }
@@ -238,6 +243,61 @@ fn build_arp_reply(
 }
 
 async fn send_restore_packets(
+    target: &Device,
+    router: &Device,
+    interface_name: &str,
+) -> Result<()> {
+    let config = PoisoningConfig::default();
+
+    let interfaces = pnet_datalink::interfaces();
+    let interface = interfaces
+        .into_iter()
+        .find(|iface| iface.name == interface_name)
+        .ok_or_else(|| NetworkError::InterfaceNotFound(interface_name.to_string()))?;
+
+    let (mut tx, _) = create_poison_channel(&interface)?;
+
+    let target_mac = parse_mac_bytes(&target.mac)?;
+    let router_mac = parse_mac_bytes(&router.mac)?;
+    let target_ip = target
+        .ip
+        .parse()
+        .map_err(|_| NetworkError::InvalidIpAddress(target.ip.clone()))?;
+    let router_ip = router
+        .ip
+        .parse()
+        .map_err(|_| NetworkError::InvalidIpAddress(router.ip.clone()))?;
+
+    for _ in 0..config.restore_count {
+        let packet1 = build_arp_reply(
+            &interface,
+            router_mac,
+            target_mac,
+            router_ip,
+            router_mac,
+            target_ip,
+        )?;
+
+        let _ = tx.send_to(&packet1, Some(interface.clone()));
+
+        let packet2 = build_arp_reply(
+            &interface,
+            target_mac,
+            router_mac,
+            target_ip,
+            target_mac,
+            router_ip,
+        )?;
+
+        let _ = tx.send_to(&packet2, Some(interface.clone()));
+
+        tokio::time::sleep(Duration::from_millis(config.restore_interval_ms)).await;
+    }
+
+    Ok(())
+}
+
+pub async fn send_single_restore(
     target: &Device,
     router: &Device,
     interface_name: &str,

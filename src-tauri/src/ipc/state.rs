@@ -6,7 +6,7 @@
 use crate::ipc::events::{emit_device_found, emit_scan_progress, emit_scan_completed};
 use crate::network::{Device, NetworkError};
 use crate::network::poisoner::{start_poisoning, stop_poisoning};
-use crate::network::whitelist::{is_whitelisted, is_protected};
+use crate::network::whitelist::check_whitelist_protection;
 use crate::network::history;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -55,8 +55,12 @@ impl Killer {
             )));
         }
 
-        // Check whitelist - if device is whitelisted and protection is enabled, reject the kill
-        if is_whitelisted(&mac).await && is_protected(&mac).await {
+        // VULN-004 Fix: Atomic check prevents TOCTOU race condition
+        // Previously: if is_whitelisted(&mac).await && is_protected(&mac).await { ... }
+        // This created a window where whitelist state could change between the two awaits.
+        // Now we use a single atomic check that acquires the lock once.
+        let (whitelisted, protected) = check_whitelist_protection(&mac).await;
+        if whitelisted && protected {
             return Err(NetworkError::PoisoningError(
                 format!("Device {} ({}) is whitelisted and protected", mac, ip)
             ));
