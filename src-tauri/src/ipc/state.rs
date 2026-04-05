@@ -224,31 +224,18 @@ impl Scanner {
         let interface_for_scan = interface_name.clone();
 
         tokio::spawn(async move {
-            // Spawn the scan task and wrap in catch_unwind to handle panics
-            let scan_future = tokio::spawn(async move {
+            // Spawn the scan task
+            let scan_handle = tokio::spawn(async move {
                 crate::network::scanner::arp_scan(&interface_for_scan).await
             });
 
-            // Handle join result (task completed or panicked)
-            let scan_result = match scan_future.await {
-                Ok(result) => Ok(result),
-                Err(join_err) => {
-                    if let Ok(panic_info) = join_err.try_into_panic() {
-                        // Propagate the panic to be caught by catch_unwind
-                        std::panic::resume_unwind(panic_info);
-                    }
-                    panic!("Spawn failed without panic")
-                }
-            };
+            // Await the scan result and catch any panics
+            let scan_result: Result<
+                Result<Vec<crate::network::Device>, crate::network::NetworkError>,
+                tokio::task::JoinError,
+            > = scan_handle.await;
 
-            // Wrap in catch_unwind to catch any panics from the spawn
-            let scan_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                match scan_result {
-                    Ok(result) => result,
-                    Err(_) => panic!("Spawn panicked"),
-                }
-            }));
-
+            // Handle the scan result
             match scan_result {
                 Ok(Ok(devices)) => {
                     let total = devices.len() as u16;
@@ -334,31 +321,18 @@ impl Scanner {
         log::info!("Starting ping scan on interface: {}", interface_name);
 
         tokio::spawn(async move {
-            // Spawn the scan task and wrap in catch_unwind to handle panics
-            let scan_future = tokio::spawn(async move {
+            // Spawn the scan task
+            let scan_handle = tokio::spawn(async move {
                 crate::network::scanner::ping_scan(&interface_for_scan).await
             });
 
-            // Handle join result (task completed or panicked)
-            let scan_result = match scan_future.await {
-                Ok(result) => Ok(result),
-                Err(join_err) => {
-                    if let Ok(panic_info) = join_err.try_into_panic() {
-                        // Propagate the panic to be caught by catch_unwind
-                        std::panic::resume_unwind(panic_info);
-                    }
-                    panic!("Spawn failed without panic")
-                }
-            };
+            // Await the scan result and catch any panics
+            let scan_result: Result<
+                Result<Vec<crate::network::Device>, crate::network::NetworkError>,
+                tokio::task::JoinError,
+            > = scan_handle.await;
 
-            // Wrap in catch_unwind to catch any panics from the spawn
-            let scan_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                match scan_result {
-                    Ok(result) => result,
-                    Err(_) => panic!("Spawn panicked"),
-                }
-            }));
-
+            // Handle the scan result
             match scan_result {
                 Ok(Ok(devices)) => {
                     let total = devices.len() as u16;
