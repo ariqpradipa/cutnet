@@ -152,23 +152,34 @@ export function DeviceTable() {
 
   const handleKillToggle = useCallback(
     async (device: Device, e: React.MouseEvent) => {
-      e.stopPropagation()
-      const killState = killStates.get(device.mac)
+      e.stopPropagation();
+      const killState = killStates.get(device.mac);
+      const wasKilled = killState?.is_killed;
 
-      if (killState?.is_killed) {
-        await unkillDevice(device)
+      try {
+        if (wasKilled) {
+          await unkillDevice(device);
+          setKillState(device.mac, {
+            mac: device.mac,
+            is_killed: false,
+            kill_type: "none",
+          });
+        } else {
+          await killDevice(device);
+          setKillState(device.mac, {
+            mac: device.mac,
+            is_killed: true,
+            kill_type: "arp_poison",
+          });
+        }
+      } catch (err) {
         setKillState(device.mac, {
           mac: device.mac,
-          is_killed: false,
-          kill_type: "none",
-        })
-      } else {
-        await killDevice(device)
-        setKillState(device.mac, {
-          mac: device.mac,
-          is_killed: true,
-          kill_type: "arp_poison",
-        })
+          is_killed: wasKilled ?? false,
+          kill_type: wasKilled ? "arp_poison" : "none",
+        });
+        console.error(`Failed to ${wasKilled ? 'unkill' : 'kill'} device ${device.ip}:`, err);
+        alert(`Failed to ${wasKilled ? 'restore' : 'kill'} device ${device.ip}: ${err instanceof Error ? err.message : 'Unknown error'}`);
       }
     },
     [killStates, setKillState]
@@ -213,15 +224,27 @@ export function DeviceTable() {
               variant="destructive"
               size="xs"
               onClick={async () => {
-                const selectedDevices = devices.filter((d) => selectedRows.has(d.ip))
+                const selectedDevices = devices.filter((d) => selectedRows.has(d.ip));
+                const failedDevices: string[] = [];
+
                 for (const device of selectedDevices) {
-                  await killDevice(device)
-                  setKillState(device.mac, {
-                    mac: device.mac,
-                    is_killed: true,
-                    kill_type: "arp_poison",
-                  })
+                  try {
+                    await killDevice(device);
+                    setKillState(device.mac, {
+                      mac: device.mac,
+                      is_killed: true,
+                      kill_type: "arp_poison",
+                    });
+                  } catch (err) {
+                    failedDevices.push(device.ip);
+                    console.error(`Failed to kill ${device.ip}:`, err);
+                  }
                 }
+
+                if (failedDevices.length > 0) {
+                  alert(`Failed to kill devices: ${failedDevices.join(", ")}`);
+                }
+                setSelectedRows(new Set());
               }}
             >
               <PowerOff data-icon="inline-start" />
@@ -231,15 +254,27 @@ export function DeviceTable() {
               variant="outline"
               size="xs"
               onClick={async () => {
-                const selectedDevices = devices.filter((d) => selectedRows.has(d.ip))
+                const selectedDevices = devices.filter((d) => selectedRows.has(d.ip));
+                const failedDevices: string[] = [];
+
                 for (const device of selectedDevices) {
-                  await unkillDevice(device)
-                  setKillState(device.mac, {
-                    mac: device.mac,
-                    is_killed: false,
-                    kill_type: "none",
-                  })
+                  try {
+                    await unkillDevice(device);
+                    setKillState(device.mac, {
+                      mac: device.mac,
+                      is_killed: false,
+                      kill_type: "none",
+                    });
+                  } catch (err) {
+                    failedDevices.push(device.ip);
+                    console.error(`Failed to unkill ${device.ip}:`, err);
+                  }
                 }
+
+                if (failedDevices.length > 0) {
+                  alert(`Failed to restore devices: ${failedDevices.join(", ")}`);
+                }
+                setSelectedRows(new Set());
               }}
             >
               <Power data-icon="inline-start" />

@@ -28,3 +28,8 @@ export const useNetworkStore = create<NetworkStore>((set) => ({
   setScanning: (scanning) => set({ isScanning: scanning }),
   setIsRunning: (running) => set({ isRunning: running }),
 }));
+
+// Helper to mark app as running (called after interfaces load)
+export function markAppRunning() {
+  useNetworkStore.getState().setIsRunning(true);
+}
