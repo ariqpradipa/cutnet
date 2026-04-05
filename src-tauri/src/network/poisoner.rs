@@ -149,7 +149,8 @@ async fn poison_target(
     router: &Device,
     my_mac: [u8; 6],
 ) -> Result<()> {
-    let target_mac = parse_mac_bytes(&target.mac)?;
+    // Validate MAC to prevent poisoning invalid addresses (security fix)
+    let target_mac = crate::network::utils::validate_unicast_mac(&target.mac)?;
     let target_ip = target
         .ip
         .parse::<std::net::Ipv4Addr>()
@@ -180,7 +181,8 @@ async fn poison_router(
     router: &Device,
     my_mac: [u8; 6],
 ) -> Result<()> {
-    let router_mac = parse_mac_bytes(&router.mac)?;
+    // Validate MAC to prevent poisoning invalid addresses (security fix)
+    let router_mac = crate::network::utils::validate_unicast_mac(&router.mac)?;
     let router_ip = router
         .ip
         .parse()

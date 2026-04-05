@@ -7,7 +7,7 @@ use pnet_datalink::{self, Channel, Config, DataLinkReceiver, DataLinkSender, Net
 use pnet_packet::arp::{ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket};
 use pnet_packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
 use pnet_packet::Packet;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinSet;
 
 use crate::network::types::{Device, NetworkError, Result};
@@ -55,10 +55,18 @@ pub async fn arp_scan(interface_name: &str) -> Result<Vec<Device>> {
 
     let discovered = Arc::new(Mutex::new(HashMap::<String, Device>::new()));
 
+    // Synchronization: ensure receiver is ready before sending first request
+    let (ready_tx, ready_rx) = oneshot::channel();
     let recv_discovered = discovered.clone();
     let recv_task = tokio::spawn(async move {
+        // Signal ready before starting to listen
+        let _ = ready_tx.send(());
         receive_arp_replies(&mut rx, &recv_discovered).await;
     });
+
+    // Wait for receiver to be ready
+    let _ = ready_rx.await;
+    tokio::time::sleep(Duration::from_millis(10)).await; // Small buffer
 
     let send_task = tokio::spawn(async move {
         send_arp_requests(&mut tx, &interface, source_ip, my_mac.octets(), &ip_range).await;

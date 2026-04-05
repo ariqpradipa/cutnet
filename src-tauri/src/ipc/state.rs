@@ -55,6 +55,10 @@ impl Killer {
             )));
         }
 
+        // CRITICAL SECURITY: Validate MAC address before poisoning
+        // Rejects broadcast, multicast, and all-zeros addresses to prevent network-wide DoS
+        let _ = crate::network::utils::validate_unicast_mac(&mac)?;
+
         // Check whitelist - if device is whitelisted and protection is enabled, reject the kill
         if is_whitelisted(&mac).await && is_protected(&mac).await {
             return Err(NetworkError::PoisoningError(

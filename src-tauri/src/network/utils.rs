@@ -1142,6 +1142,37 @@ pub fn parse_mac(mac: &str) -> Result<[u8; 6]> {
     Ok(result)
 }
 
+/// Validate MAC address for unicast use - rejects broadcast, multicast, and all-zeros
+pub fn validate_unicast_mac(mac: &str) -> Result<[u8; 6]> {
+    let bytes = parse_mac(mac)?;
+
+    // Check for all zeros
+    if bytes.iter().all(|&b| b == 0) {
+        return Err(NetworkError::MacValidationError(
+            mac.to_string(),
+            crate::network::types::MacValidationError::AllZeros,
+        ));
+    }
+
+    // Check for broadcast
+    if bytes.iter().all(|&b| b == 0xFF) {
+        return Err(NetworkError::MacValidationError(
+            mac.to_string(),
+            crate::network::types::MacValidationError::BroadcastAddress,
+        ));
+    }
+
+    // Check for multicast (LSB of first octet)
+    if bytes[0] & 0x01 != 0 {
+        return Err(NetworkError::MacValidationError(
+            mac.to_string(),
+            crate::network::types::MacValidationError::MulticastAddress,
+        ));
+    }
+
+    Ok(bytes)
+}
+
 pub fn format_mac(mac: &[u8; 6]) -> String {
     format!(
         "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
