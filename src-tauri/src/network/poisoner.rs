@@ -4,22 +4,31 @@ use std::time::Duration;
 use pnet_datalink::{self, Channel, Config, DataLinkSender, NetworkInterface};
 use pnet_packet::arp::{ArpHardwareTypes, ArpOperations, MutableArpPacket};
 use pnet_packet::ethernet::{EtherTypes, MutableEthernetPacket};
-use tokio::sync::{broadcast, Mutex, RwLock};
+use tokio::sync::{broadcast, Mutex, RwLock, Semaphore};
 use tokio::task::JoinHandle;
 
 use crate::network::types::{Device, NetworkError, PoisoningConfig, PoisoningState, Result};
 
+/// Global rate limiter: max 10 concurrent poisoning operations to prevent network flooding
 static POISONING_STATE: once_cell::sync::Lazy<RwLock<HashMap<String, PoisoningState>>> =
     once_cell::sync::Lazy::new(|| RwLock::new(HashMap::new()));
 
 static ACTIVE_HANDLES: once_cell::sync::Lazy<Mutex<HashMap<String, JoinHandle<()>>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
 
+static POISON_LIMIT: once_cell::sync::Lazy<Semaphore> =
+    once_cell::sync::Lazy::new(|| Semaphore::new(10));
+
 pub async fn start_poisoning(
     target: Device,
     router: Device,
     interface_name: &str,
 ) -> Result<()> {
+    // Enforce global rate limit: max 10 concurrent poisoning operations
+    let permit = POISON_LIMIT.acquire()
+        .await
+        .map_err(|_| NetworkError::PoisoningError("Rate limit service unavailable".to_string()))?;
+
     let state_key = format!("{}-{}", target.ip, router.ip);
 
     {
@@ -38,11 +47,12 @@ pub async fn start_poisoning(
 
     let (tx, _rx) = broadcast::channel(1);
 
-    let handle = tokio::spawn(poisoning_loop(
+    let handle = tokio::spawn(poisoning_loop_with_permit(
         target.clone(),
         router.clone(),
         interface_name.to_string(),
         tx,
+        permit,
     ));
 
     {
@@ -87,11 +97,14 @@ pub async fn stop_poisoning(target: Device, router: Device, interface_name: &str
     Ok(())
 }
 
-async fn poisoning_loop(
+/// Poisoning loop that holds a rate limit permit for its entire duration.
+/// The permit is released when the function returns (on drop).
+async fn poisoning_loop_with_permit(
     target: Device,
     router: Device,
     interface_name: String,
     stop_signal: broadcast::Sender<()>,
+    _permit: tokio::sync::SemaphorePermit<'static>,
 ) {
     let config = PoisoningConfig::default();
     let mut stop_receiver = stop_signal.subscribe();
@@ -140,6 +153,7 @@ async fn poisoning_loop(
             }
         }
     }
+    // Permit automatically released when function returns
 }
 
 async fn poison_target(
