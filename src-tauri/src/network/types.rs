@@ -12,27 +12,16 @@ use serde::{Deserialize, Serialize};
 /// and special flags indicating if it's the router or the local machine.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Device {
-    /// IP address of the device (e.g., "192.168.1.100")
     pub ip: String,
-
-    /// MAC address of the device (e.g., "aa:bb:cc:dd:ee:ff")
     pub mac: String,
-
-    /// Optional hostname from reverse DNS lookup
     pub hostname: Option<String>,
-
-    /// Optional vendor name based on MAC OUI lookup
     pub vendor: Option<String>,
-
-    /// Flag indicating if this device is the network gateway/router
     pub is_router: bool,
-
-    /// Flag indicating if this device represents the local machine
     pub is_me: bool,
+    pub custom_name: Option<String>,
 }
 
 impl Device {
-    /// Create a new Device with the given IP and MAC
     pub fn new(ip: impl Into<String>, mac: impl Into<String>) -> Self {
         Self {
             ip: ip.into(),
@@ -41,53 +30,43 @@ impl Device {
             vendor: None,
             is_router: false,
             is_me: false,
+            custom_name: None,
         }
     }
 
-    /// Mark this device as the router
     pub fn as_router(mut self) -> Self {
         self.is_router = true;
         self
     }
 
-    /// Mark this device as the local machine
     pub fn as_me(mut self) -> Self {
         self.is_me = true;
         self
     }
 
-    /// Set the hostname
     pub fn with_hostname(mut self, hostname: impl Into<String>) -> Self {
         self.hostname = Some(hostname.into());
         self
     }
 
-    /// Set the vendor
     pub fn with_vendor(mut self, vendor: impl Into<String>) -> Self {
         self.vendor = Some(vendor.into());
+        self
+    }
+
+    pub fn with_custom_name(mut self, name: impl Into<String>) -> Self {
+        self.custom_name = Some(name.into());
         self
     }
 }
 
 /// Represents a network interface (NIC) on the local machine
-///
-/// This struct contains information about a network interface including
-/// its name, IP configuration, MAC address, and network range.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NetworkInterface {
-    /// Interface name (e.g., "eth0", "en0", "Wi-Fi")
     pub name: String,
-
-    /// IP address assigned to this interface
     pub ip: String,
-
-    /// MAC address of this interface
     pub mac: String,
-
-    /// Broadcast address for this network (e.g., "192.168.1.255")
     pub broadcast_addr: String,
-
-    /// Netmask for this interface (e.g., "255.255.255.0")
     pub netmask: String,
 }
 

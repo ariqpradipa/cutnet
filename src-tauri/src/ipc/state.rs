@@ -224,6 +224,8 @@ impl Scanner {
                     emit_scan_completed(&app, 0, false);
                 }
             }
+                }
+            }
         });
 
         Ok(())

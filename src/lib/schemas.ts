@@ -8,6 +8,7 @@ export const DeviceSchema = z.object({
   vendor: z.string().nullable(),
   is_router: z.boolean(),
   is_me: z.boolean(),
+  custom_name: z.string().nullable().optional(),
 });
 
 export type Device = z.infer<typeof DeviceSchema>;

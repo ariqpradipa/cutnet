@@ -1,12 +1,13 @@
 "use client"
 
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useEffect } from "react"
 import { useDeviceStore } from "@/stores/deviceStore"
 import { useNetworkStore } from "@/stores/networkStore"
-import { killDevice, unkillDevice, killAllDevices, unkillAllDevices } from "@/utils/ipc"
+import { killDevice, unkillDevice, killAllDevices, unkillAllDevices, setDeviceCustomName, getCustomDeviceNames } from "@/utils/ipc"
 import type { Device, KillState } from "@/lib/schemas"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Table,
@@ -47,6 +48,9 @@ import {
   Monitor,
   Copy,
   Check,
+  Search,
+  Pencil,
+  Gauge,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/useToast"
@@ -94,7 +98,7 @@ function getDeviceStatus(
 }
 
 export function DeviceTable() {
-  const { devices, selectedDevice, killStates, selectDevice, setKillState } =
+  const { devices, selectedDevice, killStates, selectDevice, setKillState, updateDevice } =
     useDeviceStore()
   const { isScanning } = useNetworkStore()
   const { toast } = useToast()
@@ -103,6 +107,22 @@ export function DeviceTable() {
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const [showDetailDialog, setShowDetailDialog] = useState(false)
   const [copiedField, setCopiedField] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [customNames, setCustomNames] = useState<Record<string, string>>({})
+  const [editingName, setEditingName] = useState<string | null>(null)
+  const [editingValue, setEditingValue] = useState("")
+
+  useEffect(() => {
+    const loadNames = async () => {
+      try {
+        const names = await getCustomDeviceNames()
+        setCustomNames(names)
+      } catch (err) {
+        console.error("Failed to load custom names:", err)
+      }
+    }
+    loadNames()
+  }, [])
 
   const handleSort = useCallback(
     (field: SortField) => {
@@ -129,8 +149,21 @@ export function DeviceTable() {
     [sort]
   )
 
-  const sortedDevices = useMemo(() => {
-    const sorted = [...devices]
+  const filteredAndSortedDevices = useMemo(() => {
+    const filtered = devices.filter((device) => {
+      if (!searchQuery.trim()) return true
+      const q = searchQuery.toLowerCase()
+      const displayName = customNames[device.ip] || device.hostname || ""
+      return (
+        device.ip.toLowerCase().includes(q) ||
+        device.mac.toLowerCase().includes(q) ||
+        (device.hostname || "").toLowerCase().includes(q) ||
+        (device.vendor || "").toLowerCase().includes(q) ||
+        displayName.toLowerCase().includes(q)
+      )
+    })
+
+    const sorted = [...filtered]
     sorted.sort((a, b) => {
       let comparison = 0
 
@@ -150,7 +183,9 @@ export function DeviceTable() {
           comparison = (a.vendor || "").localeCompare(b.vendor || "")
           break
         case "hostname":
-          comparison = (a.hostname || "").localeCompare(b.hostname || "")
+          const nameA = customNames[a.ip] || a.hostname || ""
+          const nameB = customNames[b.ip] || b.hostname || ""
+          comparison = nameA.localeCompare(nameB)
           break
         default:
           comparison = 0
@@ -159,7 +194,7 @@ export function DeviceTable() {
       return sort.direction === "asc" ? comparison : -comparison
     })
     return sorted
-  }, [devices, sort, killStates, isScanning])
+  }, [devices, sort, killStates, isScanning, searchQuery, customNames])
 
   const handleRowClick = useCallback(
     (device: Device) => {
@@ -295,6 +330,33 @@ export function DeviceTable() {
   const someSelected = selectedRows.size > 0 && selectedRows.size < devices.length
   const killedCount = devices.filter(d => killStates.get(d.mac)?.is_killed).length;
 
+  const startEditingName = useCallback((device: Device) => {
+    setEditingName(device.ip)
+    setEditingValue(customNames[device.ip] || device.hostname || "")
+  }, [customNames])
+
+  const saveCustomName = useCallback(async (ip: string) => {
+    try {
+      await setDeviceCustomName(ip, editingValue)
+      setCustomNames((prev) => ({ ...prev, [ip]: editingValue }))
+      updateDevice(ip, { custom_name: editingValue || null })
+    } catch (err) {
+      console.error("Failed to save custom name:", err)
+    } finally {
+      setEditingName(null)
+      setEditingValue("")
+    }
+  }, [editingValue, updateDevice])
+
+  const handleNameKeyDown = useCallback((e: React.KeyboardEvent, ip: string) => {
+    if (e.key === "Enter") {
+      saveCustomName(ip)
+    } else if (e.key === "Escape") {
+      setEditingName(null)
+      setEditingValue("")
+    }
+  }, [saveCustomName])
+
   return (
     <TooltipProvider>
       <div className="flex flex-col gap-2">
@@ -321,6 +383,24 @@ export function DeviceTable() {
             <Badge variant="destructive" className="ml-auto">
               {killedCount} killed
             </Badge>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 px-2">
+          <div className="relative flex-1 max-w-xs">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+            <Input
+              type="text"
+              placeholder="Search by IP, MAC, hostname, vendor…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 h-8"
+            />
+          </div>
+          {searchQuery && (
+            <span className="text-xs text-muted-foreground">
+              {filteredAndSortedDevices.length} result{filteredAndSortedDevices.length !== 1 ? "s" : ""}
+            </span>
           )}
         </div>
 
@@ -461,25 +541,42 @@ export function DeviceTable() {
                     {getSortIcon("hostname")}
                   </div>
                 </TableHead>
+                <TableHead className="text-center">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex items-center gap-1 cursor-help">
+                        <Gauge className="size-3" />
+                        Bandwidth
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Coming Soon</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedDevices.length === 0 ? (
+              {filteredAndSortedDevices.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={7}
+                    colSpan={8}
                     className="h-24 text-center text-muted-foreground"
                   >
-                    No devices found. Start a scan to discover devices.
+                    {searchQuery
+                      ? "No devices match your search."
+                      : "No devices found. Start a scan to discover devices."}
                   </TableCell>
                 </TableRow>
               ) : (
-                sortedDevices.map((device) => {
+                filteredAndSortedDevices.map((device) => {
                   const status = getDeviceStatus(device, killStates, isScanning)
                   const StatusIcon = status.icon
                   const isSelected = selectedDevice?.ip === device.ip
                   const isKilled = killStates.get(device.mac)?.is_killed
+                  const displayName = customNames[device.ip] || device.hostname || "Unknown"
+                  const isEditing = editingName === device.ip
 
                   return (
                     <TableRow
@@ -541,7 +638,46 @@ export function DeviceTable() {
                         {device.vendor || "Unknown"}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {device.hostname || "Unknown"}
+                        {isEditing ? (
+                          <Input
+                            value={editingValue}
+                            onChange={(e) => setEditingValue(e.target.value)}
+                            onBlur={() => saveCustomName(device.ip)}
+                            onKeyDown={(e) => handleNameKeyDown(e, device.ip)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="h-6 text-xs w-32"
+                            autoFocus
+                          />
+                        ) : (
+                          <div
+                            className="flex items-center gap-1 group cursor-pointer"
+                            onDoubleClick={(e) => {
+                              e.stopPropagation()
+                              startEditingName(device)
+                            }}
+                          >
+                            <span className="truncate max-w-[120px]">
+                              {displayName}
+                            </span>
+                            <Pencil
+                              className="size-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                startEditingName(device)
+                              }}
+                            />
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center text-muted-foreground text-xs">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="cursor-help">—</span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Coming Soon</p>
+                          </TooltipContent>
+                        </Tooltip>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center justify-end gap-1">

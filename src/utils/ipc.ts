@@ -282,3 +282,19 @@ export async function isWhitelisted(mac: string): Promise<boolean> {
 export async function flushArpCache(): Promise<void> {
   await invoke("flush_arp_cache_cmd");
 }
+
+export async function getHistory(): Promise<any[]> {
+  return await invoke("get_history");
+}
+
+export async function clearHistory(): Promise<void> {
+  await invoke("clear_history");
+}
+
+export async function setDeviceCustomName(ip: string, name: string): Promise<void> {
+  await invoke("set_device_custom_name", { ip, name });
+}
+
+export async function getCustomDeviceNames(): Promise<Record<string, string>> {
+  return await invoke("get_custom_device_names");
+}
