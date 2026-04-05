@@ -9,6 +9,8 @@ import {
   startPingScan,
   stopScan,
   onScanProgress,
+  onScanCompleted,
+  onDeviceFound,
 } from "@/utils/ipc"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -89,19 +91,36 @@ export function ScanControls() {
         progress: event.progress,
         devices_found: event.devicesFound,
       })
-
-      // Scan complete
-      if (event.progress >= 100) {
-        setScanning(false)
-        setScanProgress(null)
-        setScanType(null)
-      }
     })
 
     return () => {
       unlisten()
     }
-  }, [setScanProgress, setScanning])
+  }, [setScanProgress])
+
+  // Listen to device found events
+  useEffect(() => {
+    const unlisten = onDeviceFound((event) => {
+      useDeviceStore.getState().addDevice(event.device)
+    })
+
+    return () => {
+      unlisten()
+    }
+  }, [])
+
+  // Listen to scan completed events
+  useEffect(() => {
+    const unlisten = onScanCompleted((event) => {
+      setScanning(false)
+      setScanProgress(null)
+      setScanType(null)
+    })
+
+    return () => {
+      unlisten()
+    }
+  }, [setScanning, setScanProgress])
 
   // Auto-refresh interval
   useEffect(() => {
@@ -130,6 +149,8 @@ export function ScanControls() {
     }
 
     setError(null)
+    useDeviceStore.getState().setDevices([])
+    useDeviceStore.getState().clearKillStates()
     setScanType("arp")
     setScanning(true)
     setScanProgress(null)
@@ -151,6 +172,8 @@ export function ScanControls() {
     }
 
     setError(null)
+    useDeviceStore.getState().setDevices([])
+    useDeviceStore.getState().clearKillStates()
     setScanType("ping")
     setScanning(true)
     setScanProgress(null)
