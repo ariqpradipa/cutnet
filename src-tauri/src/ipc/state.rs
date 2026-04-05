@@ -132,6 +132,7 @@ impl Killer {
     }
 
     /// Get list of poisoned devices
+    #[allow(dead_code)]
     pub fn get_poisoned_devices(&self) -> Vec<(String, String)> {
         self.poisoned_devices
             .iter()
@@ -140,6 +141,7 @@ impl Killer {
     }
 
     /// Check if a specific device is being poisoned
+    #[allow(dead_code)]
     pub fn is_poisoned(&self, ip: &str) -> bool {
         self.poisoned_devices.contains_key(ip)
     }
@@ -186,6 +188,7 @@ impl Scanner {
         &mut self,
         interface_name: String,
         app: AppHandle,
+        self_arc: ScannerState,
     ) -> Result<(), NetworkError> {
         if self.is_running {
             return Err(NetworkError::ArpScanError(
@@ -205,7 +208,8 @@ impl Scanner {
         let interface_for_scan = interface_name.clone();
 
         tokio::spawn(async move {
-            match crate::network::scanner::arp_scan(&interface_for_scan).await {
+            let result = crate::network::scanner::arp_scan(&interface_for_scan).await;
+            match &result {
                 Ok(devices) => {
                     let total = devices.len() as u16;
                     for (i, device) in devices.iter().enumerate() {
@@ -224,6 +228,7 @@ impl Scanner {
                     emit_scan_completed(&app, 0, false);
                 }
             }
+            self_arc.lock().await.is_running = false;
         });
 
         Ok(())
@@ -234,6 +239,7 @@ impl Scanner {
         &mut self,
         interface_name: String,
         app: AppHandle,
+        self_arc: ScannerState,
     ) -> Result<(), NetworkError> {
         if self.is_running {
             return Err(NetworkError::PingScanError(
@@ -253,7 +259,8 @@ impl Scanner {
         log::info!("Starting ping scan on interface: {}", interface_name);
 
         tokio::spawn(async move {
-            match crate::network::scanner::ping_scan(&interface_for_scan).await {
+            let result = crate::network::scanner::ping_scan(&interface_for_scan).await;
+            match &result {
                 Ok(devices) => {
                     let total = devices.len() as u16;
                     for (i, device) in devices.iter().enumerate() {
@@ -272,6 +279,7 @@ impl Scanner {
                     emit_scan_completed(&app, 0, false);
                 }
             }
+            self_arc.lock().await.is_running = false;
         });
 
         Ok(())
@@ -287,11 +295,13 @@ impl Scanner {
     }
 
     /// Add a discovered device
+    #[allow(dead_code)]
     pub fn add_device(&mut self, device: Device) {
         self.discovered_devices.push(device);
     }
 
     /// Get discovered devices
+    #[allow(dead_code)]
     pub fn get_devices(&self) -> &[Device] {
         &self.discovered_devices
     }
@@ -302,26 +312,31 @@ impl Scanner {
     }
 
     /// Get current progress
+    #[allow(dead_code)]
     pub fn get_progress(&self) -> u8 {
         self.progress
     }
 
     /// Update progress
+    #[allow(dead_code)]
     pub fn set_progress(&mut self, progress: u8) {
         self.progress = progress.min(100);
     }
 
     /// Check if stop has been signaled
+    #[allow(dead_code)]
     pub fn should_stop(&self) -> bool {
         self.should_stop
     }
 
     /// Get the current interface being scanned
+    #[allow(dead_code)]
     pub fn get_current_interface(&self) -> Option<&String> {
         self.current_interface.as_ref()
     }
 
     /// Clear discovered devices
+    #[allow(dead_code)]
     pub fn clear_devices(&mut self) {
         self.discovered_devices.clear();
     }

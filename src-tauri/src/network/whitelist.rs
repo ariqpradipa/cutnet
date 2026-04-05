@@ -107,6 +107,7 @@ impl WhitelistManager {
         self.save()
     }
 
+    #[allow(dead_code)]
     pub async fn is_protected(&self, mac: &str) -> bool {
         self.protect_enabled && self.entries.contains_key(&mac.to_lowercase())
     }
@@ -138,6 +139,7 @@ pub async fn set_protect_enabled(enabled: bool) -> Result<(), NetworkError> {
     wl.set_protect_enabled(enabled).await
 }
 
+#[allow(dead_code)]
 pub async fn is_protected(mac: &str) -> bool {
     let wl = WHITELIST.read().await;
     wl.is_protected(mac).await

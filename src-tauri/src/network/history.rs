@@ -90,6 +90,7 @@ impl HistoryManager {
     /// Log that a device has been discovered (joined the network).
     /// If the device already has an active session, this is a no-op
     /// (the device is already considered online).
+    #[allow(dead_code)]
     pub async fn log_device_joined(&mut self, device: &Device) {
         // Skip if already active
         if self.active_sessions.contains_key(&device.ip) {
@@ -121,6 +122,7 @@ impl HistoryManager {
 
     /// Log that a device has left the network.
     /// Closes the active session for the given IP.
+    #[allow(dead_code)]
     pub async fn log_device_left(&mut self, ip: &str) {
         if let Some(&idx) = self.active_sessions.get(ip) {
             let now = std::time::SystemTime::now()
@@ -150,11 +152,13 @@ impl HistoryManager {
 
 // ── Public API ──────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 pub async fn log_device_joined(device: &Device) {
     let mut mgr = HISTORY.write().await;
     mgr.log_device_joined(device).await;
 }
 
+#[allow(dead_code)]
 pub async fn log_device_left(ip: &str) {
     let mut mgr = HISTORY.write().await;
     mgr.log_device_left(ip).await;

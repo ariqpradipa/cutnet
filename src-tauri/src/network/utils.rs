@@ -1099,6 +1099,7 @@ fn normalize_mac_prefix(mac: &str) -> String {
     }
 }
 
+#[allow(dead_code)]
 pub fn get_hostname(ip: &str) -> Option<String> {
     let addr: std::net::IpAddr = ip.parse().ok()?;
     dns_lookup::lookup_addr(&addr)
@@ -1148,10 +1149,12 @@ pub fn format_mac(mac: &[u8; 6]) -> String {
     )
 }
 
+#[allow(dead_code)]
 pub fn parse_ip(ip: &str) -> Result<IpAddr> {
     IpAddr::from_str(ip).map_err(|_| NetworkError::InvalidIpAddress(ip.to_string()))
 }
 
+#[allow(dead_code)]
 pub fn check_admin_privileges() -> Result<()> {
     #[cfg(unix)]
     {
@@ -1194,6 +1197,7 @@ pub fn check_admin_privileges() -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn get_interface_ip(interface_name: &str) -> Result<String> {
     let interfaces = pnet_datalink::interfaces();
 

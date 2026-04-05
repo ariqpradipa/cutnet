@@ -87,7 +87,7 @@ pub async fn start_arp_scan(
         return Err("Scan already in progress".to_string());
     }
 
-    match scanner_lock.start_arp_scan(interface_name.clone(), app) {
+    match scanner_lock.start_arp_scan(interface_name.clone(), app, scanner.inner().clone()) {
         Ok(()) => {
             log::info!("ARP scan started successfully");
 
@@ -125,7 +125,7 @@ pub async fn start_ping_scan(
         return Err("Scan already in progress".to_string());
     }
 
-    match scanner_lock.start_ping_scan(interface_name.clone(), app) {
+    match scanner_lock.start_ping_scan(interface_name.clone(), app, scanner.inner().clone()) {
         Ok(()) => {
             log::info!("Ping scan started successfully");
 

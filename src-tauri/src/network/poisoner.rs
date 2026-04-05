@@ -292,6 +292,7 @@ async fn send_restore_packets(
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn poison_once(
     target_mac: &str,
     target_ip: &str,
@@ -372,6 +373,7 @@ fn parse_mac_bytes(mac: &str) -> Result<[u8; 6]> {
     Ok(result)
 }
 
+#[allow(dead_code)]
 pub async fn get_poisoning_state(target_ip: &str, router_ip: &str) -> PoisoningState {
     let state_key = format!("{}-{}", target_ip, router_ip);
     let state = POISONING_STATE.read().await;

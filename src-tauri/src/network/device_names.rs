@@ -69,6 +69,7 @@ impl DeviceNamesManager {
         self.save()
     }
 
+    #[allow(dead_code)]
     pub async fn get_custom_name(&self, ip: &str) -> Option<String> {
         self.names.get(ip).cloned()
     }
@@ -83,6 +84,7 @@ pub async fn set_custom_name(ip: String, name: String) -> Result<(), NetworkErro
     mgr.set_custom_name(ip, name).await
 }
 
+#[allow(dead_code)]
 pub async fn get_custom_name(ip: &str) -> Option<String> {
     let mgr = DEVICE_NAMES.read().await;
     mgr.get_custom_name(ip).await

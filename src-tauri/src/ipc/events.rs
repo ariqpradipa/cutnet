@@ -86,6 +86,7 @@ pub fn emit_device_found(app: &AppHandle, device: Device) {
 }
 
 /// Emit a device lost event to all frontend windows
+#[allow(dead_code)]
 pub fn emit_device_lost(app: &AppHandle, device: Device) {
     let event = DeviceLostEvent { device };
     if let Err(e) = app.emit("device-lost", event) {
@@ -164,6 +165,7 @@ pub fn emit_mac_address_changed(app: &AppHandle, interface: String, new_mac: Str
 }
 
 /// Emit error event to all frontend windows
+#[allow(dead_code)]
 pub fn emit_error(app: &AppHandle, message: String, code: Option<String>) {
     let event = ErrorEvent { message, code };
     if let Err(e) = app.emit("error", event) {
@@ -183,6 +185,7 @@ pub struct ArpSpoofDetectedEvent {
     pub alert_type: String,
 }
 
+#[allow(dead_code)]
 pub fn emit_arp_spoof_detected(app: &AppHandle, event: ArpSpoofDetectedEvent) {
     if let Err(e) = app.emit("arp-spoof-detected", event) {
         log::error!("Failed to emit arp-spoof-detected event: {}", e);

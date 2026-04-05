@@ -39,11 +39,13 @@ impl Device {
         self
     }
 
+    #[allow(dead_code)]
     pub fn as_me(mut self) -> Self {
         self.is_me = true;
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_hostname(mut self, hostname: impl Into<String>) -> Self {
         self.hostname = Some(hostname.into());
         self
@@ -54,6 +56,7 @@ impl Device {
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_custom_name(mut self, name: impl Into<String>) -> Self {
         self.custom_name = Some(name.into());
         self
@@ -90,6 +93,7 @@ impl NetworkInterface {
 
     /// Calculate the network prefix from the IP and netmask
     /// Returns something like "192.168.1"
+    #[allow(dead_code)]
     pub fn network_prefix(&self) -> Option<String> {
         let ip_parts: Vec<&str> = self.ip.split('.').collect();
         let mask_parts: Vec<&str> = self.netmask.split('.').collect();
@@ -160,6 +164,7 @@ impl Default for PoisoningConfig {
 }
 
 /// Error types for network operations
+#[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]
 pub enum NetworkError {
     #[error("Interface not found: {0}")]

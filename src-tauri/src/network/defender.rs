@@ -79,7 +79,7 @@ async fn defender_monitor_loop(interface_name: String, app: AppHandle) {
         ..Default::default()
     };
 
-    let (mut tx, mut rx) = match pnet_datalink::channel(&interface, config) {
+    let (tx, mut rx) = match pnet_datalink::channel(&interface, config) {
         Ok(Channel::Ethernet(tx, rx)) => (tx, rx),
         Ok(_) => {
             log::error!("Defender: Unsupported channel type");

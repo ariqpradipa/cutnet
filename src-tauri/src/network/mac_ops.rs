@@ -120,6 +120,7 @@ pub fn clone_mac(from_interface: &str, to_interface: &str) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn get_original_mac(interface: &str) -> Result<String> {
     #[cfg(target_os = "macos")]
     {
