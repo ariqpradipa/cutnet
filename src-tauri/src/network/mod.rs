@@ -1,4 +1,6 @@
 pub mod defender;
+pub mod device_names;
+pub mod history;
 pub mod mac_ops;
 pub mod poisoner;
 pub mod scanner;
@@ -29,4 +31,7 @@ pub use whitelist::{
     is_protected as whitelist_is_protected, is_whitelisted as whitelist_is_whitelisted,
     remove_entry as whitelist_remove_entry, set_protect_enabled as whitelist_set_protect,
     WhitelistEntry,
+};
+pub use history::{
+    clear_history, get_sessions, log_device_joined, log_device_left, DeviceSession,
 };

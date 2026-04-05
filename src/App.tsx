@@ -5,7 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { DeviceTable } from "@/components/DeviceTable";
 import { ScanControls } from "@/components/ScanControls";
 import { SettingsPanel } from "@/components/SettingsPanel";
-import { Shield, Users, Settings } from "lucide-react";
+import { HistoryPanel } from "@/components/HistoryPanel";
+import { Shield, Users, Settings, Clock } from "lucide-react";
 import { useNetworkStore } from "@/stores/networkStore";
 import "./App.css";
 
@@ -39,10 +40,14 @@ function App() {
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3 mb-6">
+          <TabsList className="grid w-full grid-cols-4 mb-6">
             <TabsTrigger value="devices" className="flex items-center gap-2">
               <Users className="size-4" />
               Devices
+            </TabsTrigger>
+            <TabsTrigger value="history" className="flex items-center gap-2">
+              <Clock className="size-4" />
+              History
             </TabsTrigger>
             <TabsTrigger value="defender" className="flex items-center gap-2">
               <Shield className="size-4" />
@@ -57,6 +62,10 @@ function App() {
           <TabsContent value="devices" className="space-y-6">
             <ScanControls />
             <DeviceTable />
+          </TabsContent>
+
+          <TabsContent value="history" className="space-y-6">
+            <HistoryPanel />
           </TabsContent>
 
           <TabsContent value="defender" className="space-y-6">

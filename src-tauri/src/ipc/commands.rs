@@ -629,3 +629,26 @@ pub async fn flush_arp_cache_cmd() -> Result<(), String> {
     crate::network::utils::flush_arp_cache()
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn get_history() -> Result<Vec<crate::network::history::DeviceSession>, String> {
+    Ok(crate::network::history::get_sessions().await)
+}
+
+#[tauri::command]
+pub async fn clear_history() -> Result<(), String> {
+    crate::network::history::clear_history().await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_device_custom_name(ip: String, name: String) -> Result<(), String> {
+    crate::network::device_names::set_custom_name(ip, name)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_custom_device_names() -> Result<std::collections::HashMap<String, String>, String> {
+    Ok(crate::network::device_names::get_all_names().await)
+}

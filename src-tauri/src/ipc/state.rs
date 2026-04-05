@@ -185,7 +185,9 @@ impl Scanner {
         // that performs the actual ARP scanning and emits events
         // For now, we'll simulate the scan
         tokio::spawn(async move {
-            // Simulate scan progress
+            // In a real implementation, this would call arp_scan() and
+            // compare results with previous scan to detect join/leave events.
+            // For now, simulate the scan with history hooks ready.
             for i in 0..=100 {
                 if i % 10 == 0 {
                     emit_scan_progress(&app, i, 0);

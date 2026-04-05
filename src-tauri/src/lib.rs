@@ -48,6 +48,10 @@ pub fn run() {
             ipc::commands::set_whitelist_protect,
             ipc::commands::is_whitelisted,
             ipc::commands::flush_arp_cache_cmd,
+            ipc::commands::get_history,
+            ipc::commands::clear_history,
+            ipc::commands::set_device_custom_name,
+            ipc::commands::get_custom_device_names,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
