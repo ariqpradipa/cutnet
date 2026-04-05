@@ -11,17 +11,16 @@ import { Shield, Users, Settings, Clock, Moon, Sun, ArrowLeftRight } from "lucid
 import { useNetworkStore } from "@/stores/networkStore";
 import { ToastContainer } from "@/components/ToastContainer";
 import { useTauriEvents } from "@/hooks/useTauriEvents";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import "./App.css";
 
-function App() {
+function AppContent() {
   const [activeTab, setActiveTab] = useState("devices");
   const { isRunning, isScanning } = useNetworkStore();
   const [isDark, setIsDark] = useState(false);
 
-  // Set up all Tauri IPC event listeners
   useTauriEvents();
 
-  // Initialize dark mode from localStorage or system preference
   useEffect(() => {
     const stored = localStorage.getItem("cutnet-dark-mode");
     const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -120,4 +119,10 @@ function App() {
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
+  );
+}
