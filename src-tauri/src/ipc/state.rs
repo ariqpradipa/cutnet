@@ -3,8 +3,9 @@
 //! This module manages shared state between Tauri commands using
 //! tokio::sync::Mutex for thread-safe access.
 
-use crate::ipc::events::{emit_scan_progress, emit_scan_completed};
-use crate::network::{Device, NetworkError, PoisoningConfig, PoisoningState};
+use crate::ipc::events::{emit_device_found, emit_scan_progress, emit_scan_completed};
+use crate::network::{Device, NetworkError};
+use crate::network::poisoner::{start_poisoning, stop_poisoning};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::AppHandle;
@@ -21,12 +22,10 @@ pub type ScannerState = Arc<Mutex<Scanner>>;
 pub struct Killer {
     /// Currently poisoned devices (ip -> mac mapping)
     poisoned_devices: HashMap<String, String>,
-    /// Current poisoning state
-    state: PoisoningState,
-    /// Configuration for poisoning operations
-    config: PoisoningConfig,
-    /// Flag to signal stop
-    should_stop: bool,
+    /// The network interface name to use for poisoning
+    interface_name: Option<String>,
+    /// The router/gateway device for poisoning
+    router: Option<Device>,
 }
 
 impl Killer {
@@ -34,14 +33,19 @@ impl Killer {
     pub fn new() -> Self {
         Self {
             poisoned_devices: HashMap::new(),
-            state: PoisoningState::Idle,
-            config: PoisoningConfig::default(),
-            should_stop: false,
+            interface_name: None,
+            router: None,
         }
     }
 
+    /// Set the interface name and router device for poisoning operations
+    pub fn set_interface_and_router(&mut self, interface: String, router: Device) {
+        self.interface_name = Some(interface);
+        self.router = Some(router);
+    }
+
     /// Start poisoning a device
-    pub fn kill_device(&mut self, ip: String, mac: String) -> Result<(), NetworkError> {
+    pub async fn kill_device(&mut self, ip: String, mac: String) -> Result<(), NetworkError> {
         if self.poisoned_devices.contains_key(&ip) {
             return Err(NetworkError::PoisoningError(format!(
                 "Device {} is already being poisoned",
@@ -49,19 +53,36 @@ impl Killer {
             )));
         }
 
+        let interface_name = self.interface_name.clone().ok_or_else(|| {
+            NetworkError::PoisoningError(
+                "No interface configured. Run a scan first or set the active interface.".to_string(),
+            )
+        })?;
+
+        let router = self.router.clone().ok_or_else(|| {
+            NetworkError::PoisoningError(
+                "No router configured. Run a scan first to detect the gateway.".to_string(),
+            )
+        })?;
+
+        let target = Device::new(&ip, &mac);
+
+        log::info!(
+            "Starting poisoning: target={} ({}), router={} ({}), interface={}",
+            ip, mac, router.ip, router.mac, interface_name
+        );
+
+        start_poisoning(target, router, &interface_name).await?;
+
         self.poisoned_devices.insert(ip.clone(), mac.clone());
-        self.state = PoisoningState::Active;
-        
+
         log::info!("Started poisoning device {} ({})", ip, mac);
-        
-        // In a real implementation, this would start a background task
-        // to send ARP packets at regular intervals
-        
+
         Ok(())
     }
 
     /// Stop poisoning a device and send restore packets
-    pub fn unkill_device(&mut self, ip: String, mac: String) -> Result<(), NetworkError> {
+    pub async fn unkill_device(&mut self, ip: String, mac: String) -> Result<(), NetworkError> {
         if !self.poisoned_devices.contains_key(&ip) {
             return Err(NetworkError::PoisoningError(format!(
                 "Device {} is not being poisoned",
@@ -69,33 +90,44 @@ impl Killer {
             )));
         }
 
+        let interface_name = self.interface_name.clone().ok_or_else(|| {
+            NetworkError::PoisoningError("No interface configured".to_string())
+        })?;
+
+        let router = self.router.clone().ok_or_else(|| {
+            NetworkError::PoisoningError("No router configured".to_string())
+        })?;
+
+        let target = Device::new(&ip, &mac);
+
+        log::info!("Stopping poisoning for {} ({})", ip, mac);
+
+        stop_poisoning(target, router, &interface_name).await?;
+
         self.poisoned_devices.remove(&ip);
-        
-        // Send restore packets
-        log::info!("Sending restore packets for {} ({})", ip, mac);
-        
-        // If no more devices are poisoned, set state to idle
-        if self.poisoned_devices.is_empty() {
-            self.state = PoisoningState::Idle;
-        }
-        
+
         Ok(())
     }
 
     /// Stop poisoning all devices
-    pub fn unkill_all(&mut self) -> Result<Vec<(String, String)>, NetworkError> {
+    pub async fn unkill_all(&mut self) -> Result<Vec<(String, String)>, NetworkError> {
         let devices: Vec<(String, String)> = self
             .poisoned_devices
-            .drain()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        
-        // Send restore packets for all devices
+
+        // Stop each device individually
         for (ip, mac) in &devices {
-            log::info!("Restoring device {} ({})", ip, mac);
+            if let Err(e) = self.unkill_device(ip.clone(), mac.clone()).await {
+                log::error!("Failed to stop poisoning {}: {}", ip, e);
+            }
         }
-        
-        self.state = PoisoningState::Idle;
-        
+
+        // Clear the map since unkill_device removes entries one by one,
+        // but in case of errors, ensure it's clean
+        self.poisoned_devices.clear();
+
         Ok(devices)
     }
 
@@ -110,21 +142,6 @@ impl Killer {
     /// Check if a specific device is being poisoned
     pub fn is_poisoned(&self, ip: &str) -> bool {
         self.poisoned_devices.contains_key(ip)
-    }
-
-    /// Get current poisoning state
-    pub fn get_state(&self) -> PoisoningState {
-        self.state
-    }
-
-    /// Signal the killer to stop
-    pub fn stop(&mut self) {
-        self.should_stop = true;
-    }
-
-    /// Check if stop has been signaled
-    pub fn should_stop(&self) -> bool {
-        self.should_stop
     }
 }
 
@@ -147,6 +164,8 @@ pub struct Scanner {
     progress: u8,
     /// Flag to signal stop
     should_stop: bool,
+    /// AppHandle for emitting events from background tasks
+    app: Option<AppHandle>,
 }
 
 impl Scanner {
@@ -158,6 +177,7 @@ impl Scanner {
             current_interface: None,
             progress: 0,
             should_stop: false,
+            app: None,
         }
     }
 
@@ -177,22 +197,33 @@ impl Scanner {
 
         self.is_running = true;
         self.discovered_devices.clear();
-        self.current_interface = Some(interface_name);
+        self.current_interface = Some(interface_name.clone());
         self.progress = 0;
         self.should_stop = false;
+        self.app = Some(app.clone());
 
-        // In a real implementation, this would spawn an async task
-        // that performs the actual ARP scanning and emits events
-        // For now, we'll simulate the scan
+        let interface_for_scan = interface_name.clone();
+
         tokio::spawn(async move {
-            // Simulate scan progress
-            for i in 0..=100 {
-                if i % 10 == 0 {
-                    emit_scan_progress(&app, i, 0);
+            match crate::network::scanner::arp_scan(&interface_for_scan).await {
+                Ok(devices) => {
+                    let total = devices.len() as u16;
+                    for (i, device) in devices.iter().enumerate() {
+                        emit_device_found(&app, device.clone());
+                        let progress = if total > 0 {
+                            ((i as f32 / total as f32) * 100.0) as u8
+                        } else {
+                            0
+                        };
+                        emit_scan_progress(&app, progress, (i + 1) as u16);
+                    }
+                    emit_scan_completed(&app, total, true);
                 }
-                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                Err(e) => {
+                    log::error!("ARP scan failed: {}", e);
+                    emit_scan_completed(&app, 0, false);
+                }
             }
-            emit_scan_completed(&app, 0, true);
         });
 
         Ok(())
@@ -215,20 +246,32 @@ impl Scanner {
         self.current_interface = Some(interface_name.clone());
         self.progress = 0;
         self.should_stop = false;
+        self.app = Some(app.clone());
+
+        let interface_for_scan = interface_name.clone();
 
         log::info!("Starting ping scan on interface: {}", interface_name);
 
-        // In a real implementation, this would spawn an async task
-        // that performs ICMP ping scanning
         tokio::spawn(async move {
-            // Simulate scan progress
-            for i in 0..=100 {
-                if i % 10 == 0 {
-                    emit_scan_progress(&app, i, 0);
+            match crate::network::scanner::ping_scan(&interface_for_scan).await {
+                Ok(devices) => {
+                    let total = devices.len() as u16;
+                    for (i, device) in devices.iter().enumerate() {
+                        emit_device_found(&app, device.clone());
+                        let progress = if total > 0 {
+                            ((i as f32 / total as f32) * 100.0) as u8
+                        } else {
+                            0
+                        };
+                        emit_scan_progress(&app, progress, (i + 1) as u16);
+                    }
+                    emit_scan_completed(&app, total, true);
                 }
-                tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
+                Err(e) => {
+                    log::error!("Ping scan failed: {}", e);
+                    emit_scan_completed(&app, 0, false);
+                }
             }
-            emit_scan_completed(&app, 0, true);
         });
 
         Ok(())
@@ -294,8 +337,8 @@ impl Default for Scanner {
 pub fn init_state() -> (KillerState, ScannerState) {
     let killer = Arc::new(Mutex::new(Killer::new()));
     let scanner = Arc::new(Mutex::new(Scanner::new()));
-    
+
     log::info!("IPC state initialized");
-    
+
     (killer, scanner)
 }
