@@ -35,6 +35,19 @@ pub fn run() {
             // System Information
             check_admin_privileges,
             get_system_info,
+            // ARP Defender
+            ipc::commands::start_defender,
+            ipc::commands::stop_defender,
+            ipc::commands::get_defender_alerts,
+            ipc::commands::clear_defender_alerts,
+            ipc::commands::is_defender_active,
+            // Whitelist
+            ipc::commands::add_whitelist_entry,
+            ipc::commands::remove_whitelist_entry,
+            ipc::commands::get_whitelist_entries,
+            ipc::commands::set_whitelist_protect,
+            ipc::commands::is_whitelisted,
+            ipc::commands::flush_arp_cache_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

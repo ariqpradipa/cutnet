@@ -1268,6 +1268,63 @@ pub fn generate_network_range(network_prefix: &str, netmask: &str) -> Vec<String
         .collect()
 }
 
+pub fn flush_arp_cache() -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("arp")
+            .arg("-an")
+            .output()
+            .map_err(|e| NetworkError::IoError(e))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            if let Some(ip) = line.split('(').nth(1).and_then(|s| s.split(')').next()) {
+                let _ = std::process::Command::new("arp").args(["-d", ip]).output();
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let output = std::process::Command::new("ip")
+            .args(["-s", "neigh", "flush", "all"])
+            .output()
+            .map_err(|e| NetworkError::IoError(e))?;
+
+        if !output.status.success() {
+            return Err(NetworkError::IoError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Failed to flush ARP cache",
+            )));
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let output = std::process::Command::new("arp")
+            .args(["-d", "*"])
+            .output()
+            .map_err(|e| NetworkError::IoError(e))?;
+
+        if !output.status.success() {
+            return Err(NetworkError::IoError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Failed to flush ARP cache",
+            )));
+        }
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        Err(NetworkError::PlatformNotSupported(
+            "ARP cache flush not supported".to_string(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

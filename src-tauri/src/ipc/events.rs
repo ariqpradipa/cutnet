@@ -172,3 +172,19 @@ pub fn emit_error(app: &AppHandle, message: String, code: Option<String>) {
         log::debug!("Emitted error event");
     }
 }
+
+/// Event emitted when ARP spoofing is detected
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpSpoofDetectedEvent {
+    pub timestamp: u64,
+    pub claimed_ip: String,
+    pub legitimate_mac: String,
+    pub attacker_mac: String,
+    pub alert_type: String,
+}
+
+pub fn emit_arp_spoof_detected(app: &AppHandle, event: ArpSpoofDetectedEvent) {
+    if let Err(e) = app.emit("arp-spoof-detected", event) {
+        log::error!("Failed to emit arp-spoof-detected event: {}", e);
+    }
+}
