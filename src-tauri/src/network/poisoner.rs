@@ -7,6 +7,7 @@ use pnet_packet::ethernet::{EtherTypes, MutableEthernetPacket};
 use tokio::sync::{broadcast, Mutex, RwLock, Semaphore};
 use tokio::task::JoinHandle;
 
+use crate::network::killed_macs::add_mac as add_killed_mac;
 use crate::network::poison_state::{add_poisoning_target, remove_poisoning_target};
 use crate::network::types::{Device, NetworkError, PoisoningConfig, PoisoningState, Result};
 
@@ -30,7 +31,7 @@ pub async fn start_poisoning(
         .await
         .map_err(|_| NetworkError::PoisoningError("Rate limit service unavailable".to_string()))?;
 
-    let state_key = format!("{}-{}", target.ip, router.ip);
+    let state_key = format!("{}-{}", target.mac, router.mac);
 
     {
         let state = POISONING_STATE.read().await;
@@ -47,6 +48,7 @@ pub async fn start_poisoning(
     }
 
     let _ = add_poisoning_target(&target, &router, interface_name).await;
+    let _ = add_killed_mac(target.mac.clone(), target.ip.clone()).await;
 
     let (tx, _rx) = broadcast::channel(1);
 
@@ -67,7 +69,7 @@ pub async fn start_poisoning(
 }
 
 pub async fn stop_poisoning(target: Device, router: Device, interface_name: &str) -> Result<()> {
-    let state_key = format!("{}-{}", target.ip, router.ip);
+    let state_key = format!("{}-{}", target.mac, router.mac);
 
     {
         let state = POISONING_STATE.read().await;

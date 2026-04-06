@@ -77,6 +77,9 @@ pub fn run() {
             get_forwarding_rules,
             get_forwarding_stats,
             get_active_forwarding_sessions,
+            get_killed_macs,
+            is_mac_killed,
+            clear_killed_macs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

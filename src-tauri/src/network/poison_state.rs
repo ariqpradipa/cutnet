@@ -121,7 +121,7 @@ impl PoisonStateManager {
         interface: &str,
     ) -> Result<()> {
         let mut data = self.load();
-        let state_key = format!("{}-{}", target.ip, router.ip);
+        let state_key = format!("{}-{}", target.mac, router.mac);
 
         let timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)

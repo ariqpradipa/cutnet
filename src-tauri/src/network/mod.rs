@@ -6,6 +6,7 @@ pub mod device_names;
 pub mod forwarder;
 pub mod forwarding;
 pub mod history;
+pub mod killed_macs;
 pub mod mac_ops;
 pub mod poison_state;
 pub mod poisoner;
@@ -31,3 +32,4 @@ pub use forwarder::{
     add_forwarding_rule, remove_forwarding_rule, get_forwarding_rules,
     get_forwarding_stats, get_active_sessions,
 };
+pub use killed_macs;

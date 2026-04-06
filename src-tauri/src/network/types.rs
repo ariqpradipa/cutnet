@@ -431,3 +431,73 @@ impl ConnectionInfo {
         }
     }
 }
+
+// ===== Kill Target Types (MAC-based Persistent Tracking) =====
+
+/// Represents a kill target - tracks by MAC with mutable IP
+/// 
+/// This structure is MAC-centric to prevent DHCP/IP renewal bypass.
+/// The MAC address is hardware-based and constant, while IP can change.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KillTarget {
+    /// MAC address (immutable identifier)
+    pub mac: String,
+    /// Current IP address (can change on DHCP renewal)
+    pub ip: String,
+    /// Router/gateway device
+    pub router: Device,
+    /// Interface name for poisoning
+    pub interface_name: String,
+    /// When this device was first killed (UNIX timestamp)
+    pub killed_at: u64,
+    /// Whether poisoning is currently active
+    pub is_active: bool,
+}
+
+impl KillTarget {
+    pub fn new(
+        mac: impl Into<String>,
+        ip: impl Into<String>,
+        router: Device,
+        interface_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            mac: mac.into(),
+            ip: ip.into(),
+            router,
+            interface_name: interface_name.into(),
+            killed_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            is_active: true,
+        }
+    }
+}
+
+/// State of a kill target from persistence
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistentKillTarget {
+    /// MAC address (persistent identifier)
+    pub mac: String,
+    /// First observed IP when killed
+    pub first_seen_ip: String,
+    /// When this device was first killed (UNIX timestamp)
+    pub killed_at: u64,
+    /// Whether to auto-kill when this MAC is detected
+    pub auto_kill: bool,
+}
+
+impl PersistentKillTarget {
+    pub fn new(mac: impl Into<String>, ip: impl Into<String>) -> Self {
+        Self {
+            mac: mac.into(),
+            first_seen_ip: ip.into(),
+            killed_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            auto_kill: true,
+        }
+    }
+}

@@ -740,3 +740,24 @@ pub async fn get_forwarding_stats(
 pub async fn get_active_forwarding_sessions() -> Result<Vec<(String, String, String)>, String> {
     Ok(crate::network::get_active_sessions().await)
 }
+
+// ===== Killed MACs Management Commands =====
+
+/// Get all persistently killed MACs
+#[tauri::command]
+pub async fn get_killed_macs() -> Result<Vec<crate::network::types::PersistentKillTarget>, String> {
+    Ok(crate::network::killed_macs::get_all().await)
+}
+
+/// Check if a MAC address is in the killed list
+#[tauri::command]
+pub async fn is_mac_killed(mac: String) -> Result<bool, String> {
+    Ok(crate::network::killed_macs::is_killed(&mac).await)
+}
+
+/// Clear all killed MACs (stop auto-kill on detection)
+#[tauri::command]
+pub async fn clear_killed_macs() -> Result<(), String> {
+    crate::network::killed_macs::clear_all().await
+        .map_err(|e| e.to_string())
+}
