@@ -5,20 +5,31 @@ mod network;
 
 use ipc::commands::*;
 use ipc::state::init_state;
+use network::scheduler::Scheduler;
+use std::sync::Arc;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Initialize shared state
-    let (killer_state, scanner_state) = init_state();
+    let rt = tokio::runtime::Runtime::new().unwrap();
 
-    tokio::runtime::Runtime::new().unwrap().block_on(async {
+    rt.block_on(async {
         let _ = crate::network::poison_state::recover_from_crash().await;
+        let _ = crate::network::apply_saved_limits().await;
     });
 
-    tauri::Builder::default()
+    let (killer_state, scanner_state) = init_state();
+    let scheduler = Arc::new(Scheduler::new(killer_state.clone()));
+
+    let scheduler_clone = scheduler.clone();
+    rt.spawn(async move {
+        scheduler_clone.start().await;
+    });
+
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(killer_state)
         .manage(scanner_state)
+        .manage(scheduler)
         .invoke_handler(tauri::generate_handler![
             get_interfaces,
             start_arp_scan,
@@ -33,21 +44,39 @@ pub fn run() {
             clone_mac_address,
             check_admin_privileges,
             get_system_info,
-            ipc::commands::start_defender,
-            ipc::commands::stop_defender,
-            ipc::commands::get_defender_alerts,
-            ipc::commands::clear_defender_alerts,
-            ipc::commands::is_defender_active,
-            ipc::commands::add_whitelist_entry,
-            ipc::commands::remove_whitelist_entry,
-            ipc::commands::get_whitelist_entries,
-            ipc::commands::set_whitelist_protect,
-            ipc::commands::is_whitelisted,
-            ipc::commands::flush_arp_cache_cmd,
-            ipc::commands::get_history,
-            ipc::commands::clear_history,
-            ipc::commands::set_device_custom_name,
-            ipc::commands::get_custom_device_names,
+            start_defender,
+            stop_defender,
+            get_defender_alerts,
+            clear_defender_alerts,
+            is_defender_active,
+            add_whitelist_entry,
+            remove_whitelist_entry,
+            get_whitelist_entries,
+            set_whitelist_protect,
+            is_whitelisted,
+            flush_arp_cache_cmd,
+            get_history,
+            clear_history,
+            set_device_custom_name,
+            get_custom_device_names,
+            set_bandwidth_limit,
+            remove_bandwidth_limit,
+            get_bandwidth_limits,
+            get_bandwidth_stats,
+            create_schedule,
+            get_all_schedules,
+            get_device_schedules,
+            update_schedule,
+            delete_schedule,
+            toggle_schedule,
+            start_forwarding,
+            stop_forwarding,
+            is_forwarding_active,
+            add_forwarding_rule,
+            remove_forwarding_rule,
+            get_forwarding_rules,
+            get_forwarding_stats,
+            get_active_forwarding_sessions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

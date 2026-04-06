@@ -1,6 +1,5 @@
 import { create } from "zustand";
-import type { Device, KillState } from "@/lib/schemas";
-import type { BandwidthLimit, BandwidthStats } from "@/utils/ipc";
+import type { Device, KillState, BandwidthLimit, BandwidthStats } from "@/lib/schemas";
 
 interface DeviceStore {
   devices: Device[];

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react"
 import { getHistory, clearHistory } from "@/utils/ipc"
+import type { HistoryEntry } from "@/lib/schemas"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -22,16 +23,6 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Trash2, Clock } from "lucide-react"
-
-interface HistoryEntry {
-  ip: string
-  mac: string
-  hostname: string | null
-  vendor: string | null
-  custom_name: string | null
-  joined_at: number
-  left_at: number | null
-}
 
 function formatTimestamp(ts: number): string {
   return new Date(ts * 1000).toLocaleString()
@@ -82,7 +73,7 @@ export function HistoryPanel() {
   }, [])
 
   const sortedEntries = [...entries].sort(
-    (a, b) => b.joined_at - a.joined_at
+    (a, b) => b.join_time - a.join_time
   )
 
   return (
@@ -132,29 +123,29 @@ export function HistoryPanel() {
               </TableRow>
             ) : (
               sortedEntries.map((entry, idx) => (
-                <TableRow key={`${entry.ip}-${entry.joined_at}-${idx}`}>
+                <TableRow key={`${entry.ip}-${entry.join_time}-${idx}`}>
                   <TableCell>
-                    <Badge variant={entry.left_at ? "secondary" : "default"}>
-                      {entry.left_at ? "Left" : "Joined"}
+                    <Badge variant={entry.leave_time ? "secondary" : "default"}>
+                      {entry.leave_time ? "Left" : "Joined"}
                     </Badge>
                   </TableCell>
                   <TableCell className="font-mono text-xs">{entry.ip}</TableCell>
                   <TableCell className="font-mono text-xs">{entry.mac}</TableCell>
                   <TableCell className="text-muted-foreground">
-                    {entry.custom_name || entry.hostname || "Unknown"}
+                    {entry.hostname || "Unknown"}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {entry.vendor || "Unknown"}
                   </TableCell>
                   <TableCell className="text-xs">
-                    {formatTimestamp(entry.joined_at)}
+                    {formatTimestamp(entry.join_time)}
                   </TableCell>
                   <TableCell className="text-xs">
-                    {entry.left_at ? formatTimestamp(entry.left_at) : "—"}
+                    {entry.leave_time ? formatTimestamp(entry.leave_time) : "—"}
                   </TableCell>
                   <TableCell className="text-xs">
-                    {entry.left_at
-                      ? formatDuration(entry.joined_at, entry.left_at)
+                    {entry.leave_time
+                      ? formatDuration(entry.join_time, entry.leave_time)
                       : "Still online"}
                   </TableCell>
                 </TableRow>

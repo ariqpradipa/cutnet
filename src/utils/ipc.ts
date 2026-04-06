@@ -1,6 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Device, NetworkInterface } from "@/lib/schemas";
+import type {
+  Device,
+  NetworkInterface,
+  BandwidthLimit,
+  BandwidthStats,
+  DefenderAlert,
+  WhitelistEntry,
+  HistoryEntry,
+} from "@/lib/schemas";
 import { NetworkInterfaceSchema } from "@/lib/schemas";
 
 export interface ApiError {
@@ -301,7 +309,7 @@ export async function stopDefender(): Promise<void> {
   await invoke("stop_defender");
 }
 
-export async function getDefenderAlerts(): Promise<any[]> {
+export async function getDefenderAlerts(): Promise<DefenderAlert[]> {
   return await invoke("get_defender_alerts");
 }
 
@@ -321,7 +329,7 @@ export async function removeWhitelistEntry(mac: string): Promise<boolean> {
   return await invoke("remove_whitelist_entry", { mac });
 }
 
-export async function getWhitelistEntries(): Promise<any[]> {
+export async function getWhitelistEntries(): Promise<WhitelistEntry[]> {
   return await invoke("get_whitelist_entries");
 }
 
@@ -337,7 +345,7 @@ export async function flushArpCache(): Promise<void> {
   await invoke("flush_arp_cache_cmd");
 }
 
-export async function getHistory(): Promise<any[]> {
+export async function getHistory(): Promise<HistoryEntry[]> {
   return await invoke("get_history");
 }
 
@@ -351,22 +359,6 @@ export async function setDeviceCustomName(ip: string, name: string): Promise<voi
 
 export async function getCustomDeviceNames(): Promise<Record<string, string>> {
   return await invoke("get_custom_device_names");
-}
-
-// Bandwidth control types
-export interface BandwidthLimit {
-  mac: string;
-  download_limit_kbps: number | null;
-  upload_limit_kbps: number | null;
-  enabled: boolean;
-}
-
-export interface BandwidthStats {
-  mac: string;
-  current_download_kbps: number;
-  current_upload_kbps: number;
-  total_download_bytes: number;
-  total_upload_bytes: number;
 }
 
 // Bandwidth control functions

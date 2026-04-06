@@ -240,3 +240,194 @@ impl std::fmt::Display for MacValidationError {
         }
     }
 }
+
+// ===== Schedule Types =====
+
+/// Action to perform for a scheduled event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "action_type")]
+pub enum ScheduleAction {
+    /// Kill the target device
+    Kill,
+    /// Restore the target device
+    Restore,
+    /// Kill for a duration then auto-restore
+    KillAndRestore { duration_minutes: u32 },
+}
+
+/// Type of schedule timing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "schedule_type")]
+pub enum ScheduleType {
+    /// One-time execution at a specific timestamp
+    OneTime { execute_at: u64 },
+    /// Daily execution at a specific time
+    Daily { time: TimeOfDay },
+    /// Weekly execution on specific days
+    Weekly {
+        days: Vec<DayOfWeek>,
+        time: TimeOfDay,
+    },
+}
+
+/// Time of day for scheduled execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeOfDay {
+    pub hour: u8,
+    pub minute: u8,
+}
+
+/// Day of week for weekly schedules
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DayOfWeek {
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+    Sunday,
+}
+
+impl DayOfWeek {
+    pub fn from_chrono(day: chrono::Weekday) -> Self {
+        match day {
+            chrono::Weekday::Mon => DayOfWeek::Monday,
+            chrono::Weekday::Tue => DayOfWeek::Tuesday,
+            chrono::Weekday::Wed => DayOfWeek::Wednesday,
+            chrono::Weekday::Thu => DayOfWeek::Thursday,
+            chrono::Weekday::Fri => DayOfWeek::Friday,
+            chrono::Weekday::Sat => DayOfWeek::Saturday,
+            chrono::Weekday::Sun => DayOfWeek::Sunday,
+        }
+    }
+}
+
+/// A scheduled kill/restore operation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KillSchedule {
+    pub id: String,
+    pub device_mac: String,
+    pub device_ip: String,
+    pub action: ScheduleAction,
+    pub schedule_type: ScheduleType,
+    pub enabled: bool,
+    pub created_at: u64,
+    pub timezone_offset: i32,
+}
+
+// ===== Forwarding Types =====
+
+/// Action for a forwarding rule
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ForwardAction {
+    Allow,
+    Block,
+    Log,
+    Modify,
+}
+
+/// Protocol for forwarding rules
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Protocol {
+    TCP,
+    UDP,
+    ICMP,
+    All,
+}
+
+/// Direction of a packet in forwarding
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PacketDirection {
+    VictimToRouter,
+    RouterToVictim,
+}
+
+/// TCP state machine states
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TcpState {
+    SynSent,
+    SynReceived,
+    Established,
+    FinWait1,
+    FinWait2,
+    CloseWait,
+    Closing,
+    LastAck,
+    TimeWait,
+    Closed,
+}
+
+/// A rule for packet forwarding filtering
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForwardingRule {
+    pub id: String,
+    pub protocol: Protocol,
+    pub port: Option<u16>,
+    pub action: ForwardAction,
+    pub description: Option<String>,
+}
+
+/// Configuration for packet forwarding
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForwardingConfig {
+    pub enabled: bool,
+    pub victim_mac: String,
+    pub router_mac: String,
+    pub interface_name: String,
+    #[serde(skip)]
+    pub forward_stats: ForwardStats,
+}
+
+/// Statistics for packet forwarding
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ForwardStats {
+    pub packets_forwarded: u64,
+    pub bytes_forwarded: u64,
+    pub packets_dropped: u64,
+    pub bytes_dropped: u64,
+    pub packets_modified: u64,
+    pub active_connections: u64,
+}
+
+// ===== Connection Tracking Types =====
+
+/// Information about a tracked connection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionInfo {
+    pub src_ip: String,
+    pub dst_ip: String,
+    pub src_port: u16,
+    pub dst_port: u16,
+    pub protocol: Protocol,
+    pub packets_sent: u64,
+    pub bytes_sent: u64,
+    pub packets_received: u64,
+    pub bytes_received: u64,
+    pub state: TcpState,
+    pub last_activity: chrono::DateTime<chrono::Utc>,
+}
+
+impl ConnectionInfo {
+    pub fn new(
+        src_ip: impl Into<String>,
+        dst_ip: impl Into<String>,
+        src_port: u16,
+        dst_port: u16,
+        protocol: Protocol,
+    ) -> Self {
+        Self {
+            src_ip: src_ip.into(),
+            dst_ip: dst_ip.into(),
+            src_port,
+            dst_port,
+            protocol,
+            packets_sent: 0,
+            bytes_sent: 0,
+            packets_received: 0,
+            bytes_received: 0,
+            state: TcpState::Established,
+            last_activity: chrono::Utc::now(),
+        }
+    }
+}

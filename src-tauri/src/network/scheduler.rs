@@ -164,6 +164,7 @@ async fn execute_schedule_action(
             let killer_state_clone = killer_state.clone();
             let device_ip = schedule.device_ip.clone();
             let device_mac = schedule.device_mac.clone();
+            let duration_mins = *duration_minutes;
 
             tokio::spawn(async move {
                 tokio::time::sleep(duration).await;
@@ -171,7 +172,7 @@ async fn execute_schedule_action(
                     "Auto-restoring device {} ({}) after {} minutes",
                     device_ip,
                     device_mac,
-                    duration_minutes
+                    duration_mins
                 );
 
                 let mut killer = killer_state_clone.lock().await;

@@ -273,17 +273,18 @@ async fn forwarding_loop(
 
     log::info!("Forwarding loop started for victim {}", victim_mac);
 
+    let mut rx_opt = Some(rx);
+    
     loop {
+        let rx_ref = rx_opt.as_mut().unwrap();        
         tokio::select! {
             _ = stop_rx.recv() => {
                 log::info!("Forwarding loop received stop signal");
                 break;
             }
-            result = tokio::task::spawn_blocking(|| {
-                rx.next()
-            }) => {
+            result = rx_ref.next() => {
                 match result {
-                    Ok(Ok(packet)) => {
+                    Ok(packet) => {
                         if let Err(e) = process_packet(
                             packet,
                             &mut tx,
@@ -296,11 +297,8 @@ async fn forwarding_loop(
                             log::debug!("Packet processing error: {}", e);
                         }
                     }
-                    Ok(Err(e)) => {
-                        log::debug!("Packet receive error: {}", e);
-                    }
                     Err(e) => {
-                        log::error!("Packet processing task failed: {}", e);
+                        log::debug!("Packet receive error: {}", e);
                     }
                 }
             }
@@ -370,7 +368,10 @@ fn determine_packet_direction(
     }
 }
 
-async fn check_forwarding_rules(ipv4: &Ipv4Packet, config: &ForwardingConfig) -> Result<bool> {
+async fn check_forwarding_rules(
+    ipv4: &Ipv4Packet<'_>,
+    config: &ForwardingConfig,
+) -> Result<bool> {
     let protocol = ipv4.get_next_level_protocol();
     let src_ip = ipv4.get_source();
     let dst_ip = ipv4.get_destination();

@@ -168,7 +168,7 @@ pub async fn track_connection(
             state: initial_state,
         };
 
-        tracker.connections.insert(key, tracked);
+        tracker.connections.insert(key, tracked.clone());
         tracked
     };
 

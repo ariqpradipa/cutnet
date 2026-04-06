@@ -10,8 +10,6 @@ import {
   stopScan,
   onScanProgress,
   onScanCompleted,
-  onDeviceFound,
-  onDeviceLost,
 } from "@/utils/ipc"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -104,28 +102,6 @@ export function ScanControls() {
     }
   }, [setScanProgress])
 
-  // Listen to device found events
-  useEffect(() => {
-    const unlisten = onDeviceFound((event) => {
-      useDeviceStore.getState().addDevice(event.device)
-    })
-
-    return () => {
-      unlisten()
-    }
-  }, [])
-
-  // Listen to device lost events
-  useEffect(() => {
-    const unlisten = onDeviceLost((event) => {
-      useDeviceStore.getState().removeDevice(event.device.ip)
-    })
-
-    return () => {
-      unlisten()
-    }
-  }, [])
-
   // Listen to scan completed events
   useEffect(() => {
     const unlisten = onScanCompleted((_event) => {
@@ -167,7 +143,6 @@ export function ScanControls() {
 
     setError(null)
     useDeviceStore.getState().setDevices([])
-    useDeviceStore.getState().clearKillStates()
     setScanType("arp")
     setScanning(true)
     setScanProgress(null)
@@ -190,7 +165,6 @@ export function ScanControls() {
 
     setError(null)
     useDeviceStore.getState().setDevices([])
-    useDeviceStore.getState().clearKillStates()
     setScanType("ping")
     setScanning(true)
     setScanProgress(null)

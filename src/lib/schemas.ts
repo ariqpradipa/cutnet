@@ -59,3 +59,52 @@ export const IpcResponseSchema = z.union([
 ]);
 
 export type IpcResponse = z.infer<typeof IpcResponseSchema>;
+
+export const DefenderAlertSchema = z.object({
+  timestamp: z.number(),
+  claimed_ip: z.string(),
+  legitimate_mac: z.string(),
+  attacker_mac: z.string(),
+  alert_type: z.string(),
+});
+
+export type DefenderAlert = z.infer<typeof DefenderAlertSchema>;
+
+export const WhitelistEntrySchema = z.object({
+  mac: z.string(),
+  label: z.string().nullable().optional(),
+  added_at: z.number(),
+});
+
+export type WhitelistEntry = z.infer<typeof WhitelistEntrySchema>;
+
+export const HistoryEntrySchema = z.object({
+  ip: z.string(),
+  mac: z.string(),
+  hostname: z.string().nullable(),
+  vendor: z.string().nullable(),
+  join_time: z.number(),
+  leave_time: z.number().nullable(),
+  was_killed: z.boolean().optional(),
+});
+
+export type HistoryEntry = z.infer<typeof HistoryEntrySchema>;
+
+export const BandwidthLimitSchema = z.object({
+  mac: z.string(),
+  download_limit_kbps: z.number().nullable(),
+  upload_limit_kbps: z.number().nullable(),
+  enabled: z.boolean(),
+});
+
+export type BandwidthLimit = z.infer<typeof BandwidthLimitSchema>;
+
+export const BandwidthStatsSchema = z.object({
+  mac: z.string(),
+  current_download_kbps: z.number(),
+  current_upload_kbps: z.number(),
+  total_download_bytes: z.number(),
+  total_upload_bytes: z.number(),
+});
+
+export type BandwidthStats = z.infer<typeof BandwidthStatsSchema>;

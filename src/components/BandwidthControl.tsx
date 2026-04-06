@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import type { Device } from "@/lib/schemas"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -92,6 +92,11 @@ export function BandwidthControl({
   )
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setDownloadLimit(limit?.download_limit_kbps?.toString() || "0")
+    setUploadLimit(limit?.upload_limit_kbps?.toString() || "0")
+  }, [limit])
 
   const hasLimit = limit?.enabled && (limit.download_limit_kbps || limit.upload_limit_kbps)
 

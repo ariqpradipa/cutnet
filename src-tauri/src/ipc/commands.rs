@@ -594,3 +594,149 @@ pub async fn get_bandwidth_stats(mac: String) -> Result<crate::network::bandwidt
 
     controller.get_stats(&mac).await.map_err(|e| e.to_string())
 }
+
+// ===== Schedule Commands =====
+
+/// Create a new kill schedule
+#[tauri::command]
+pub async fn create_schedule(
+    device_mac: String,
+    device_ip: String,
+    action: crate::network::ScheduleAction,
+    schedule_type: crate::network::ScheduleType,
+) -> Result<String, String> {
+    crate::network::create_schedule(device_mac, device_ip, action, schedule_type)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Get all schedules
+#[tauri::command]
+pub async fn get_all_schedules() -> Result<Vec<crate::network::KillSchedule>, String> {
+    Ok(crate::network::get_all_schedules().await)
+}
+
+/// Get schedules for a specific device
+#[tauri::command]
+pub async fn get_device_schedules(device_mac: String) -> Result<Vec<crate::network::KillSchedule>, String> {
+    Ok(crate::network::get_device_schedules(&device_mac).await)
+}
+
+/// Update a schedule
+#[tauri::command]
+pub async fn update_schedule(
+    id: String,
+    updates: crate::network::schedules::ScheduleUpdate,
+) -> Result<(), String> {
+    crate::network::update_schedule(&id, updates)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Delete a schedule
+#[tauri::command]
+pub async fn delete_schedule(id: String) -> Result<bool, String> {
+    crate::network::delete_schedule(&id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Toggle schedule enabled/disabled
+#[tauri::command]
+pub async fn toggle_schedule(id: String, enabled: bool) -> Result<(), String> {
+    crate::network::toggle_schedule(&id, enabled)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// ===== Forwarding Commands =====
+
+/// Start packet forwarding for MITM
+#[tauri::command]
+pub async fn start_forwarding(
+    victim_mac: String,
+    router_mac: String,
+    interface_name: String,
+) -> Result<(), String> {
+    crate::network::start_forwarding(victim_mac, router_mac, interface_name)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Stop packet forwarding
+#[tauri::command]
+pub async fn stop_forwarding(
+    victim_mac: String,
+    router_mac: String,
+    interface_name: String,
+) -> Result<(), String> {
+    crate::network::stop_forwarding(&victim_mac, &router_mac, &interface_name)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Check if forwarding is active
+#[tauri::command]
+pub async fn is_forwarding_active(
+    victim_mac: String,
+    router_mac: String,
+    interface_name: String,
+) -> Result<bool, String> {
+    Ok(crate::network::is_forwarding_active(&victim_mac, &router_mac, &interface_name).await)
+}
+
+/// Add forwarding rule
+#[tauri::command]
+pub async fn add_forwarding_rule(
+    victim_mac: String,
+    router_mac: String,
+    interface_name: String,
+    rule: crate::network::ForwardingRule,
+) -> Result<(), String> {
+    crate::network::add_forwarding_rule(&victim_mac, &router_mac, &interface_name, rule)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Remove forwarding rule
+#[tauri::command]
+pub async fn remove_forwarding_rule(
+    victim_mac: String,
+    router_mac: String,
+    interface_name: String,
+    rule_id: String,
+) -> Result<bool, String> {
+    crate::network::remove_forwarding_rule(&victim_mac, &router_mac, &interface_name, &rule_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Get forwarding rules
+#[tauri::command]
+pub async fn get_forwarding_rules(
+    victim_mac: String,
+    router_mac: String,
+    interface_name: String,
+) -> Result<Vec<crate::network::ForwardingRule>, String> {
+    crate::network::get_forwarding_rules(&victim_mac, &router_mac, &interface_name)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Get forwarding stats
+#[tauri::command]
+pub async fn get_forwarding_stats(
+    victim_mac: String,
+    router_mac: String,
+    interface_name: String,
+) -> Result<crate::network::ForwardStats, String> {
+    crate::network::get_forwarding_stats(&victim_mac, &router_mac, &interface_name)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Get active forwarding sessions
+#[tauri::command]
+pub async fn get_active_forwarding_sessions() -> Result<Vec<(String, String, String)>, String> {
+    Ok(crate::network::get_active_sessions().await)
+}

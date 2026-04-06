@@ -5,6 +5,7 @@
 
 use crate::network::types::{DayOfWeek, KillSchedule, ScheduleAction, ScheduleType, TimeOfDay};
 use crate::network::NetworkError;
+use chrono::Datelike;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -179,7 +180,7 @@ impl SchedulesManager {
 }
 
 /// Updates that can be applied to a schedule
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ScheduleUpdate {
     pub action: Option<ScheduleAction>,
     pub schedule_type: Option<ScheduleType>,

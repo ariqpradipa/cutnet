@@ -36,6 +36,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useNetworkStore } from "@/stores/networkStore";
+import { useDeviceStore } from "@/stores/deviceStore";
 import { invoke } from "@tauri-apps/api/core";
 import type { Device } from "@/lib/schemas";
 
@@ -57,7 +58,8 @@ interface ForwardingRule {
 }
 
 export function ForwardingPanel() {
-  const { devices, activeInterface } = useNetworkStore();
+  const { activeInterface } = useNetworkStore();
+  const devices = useDeviceStore((s) => s.devices);
   const [selectedVictim, setSelectedVictim] = useState<string>("");
   const [routerMac, setRouterMac] = useState<string>("");
   const [isForwardingEnabled, setIsForwardingEnabled] = useState<boolean>(false);
