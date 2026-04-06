@@ -25,7 +25,7 @@ pub fn run() {
         scheduler_clone.start().await;
     });
 
-    let app = tauri::Builder::default()
+    let _app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(killer_state)
         .manage(scanner_state)
