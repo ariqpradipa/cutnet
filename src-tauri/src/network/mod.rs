@@ -32,4 +32,3 @@ pub use forwarder::{
     add_forwarding_rule, remove_forwarding_rule, get_forwarding_rules,
     get_forwarding_stats, get_active_sessions,
 };
-pub use killed_macs;
