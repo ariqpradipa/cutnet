@@ -203,7 +203,7 @@ fn calculate_next_execution(schedule: &KillSchedule) -> Option<u64> {
         ScheduleType::Daily { time } => {
             let today = now.date_naive();
             let scheduled_time = chrono::NaiveTime::from_hms_opt(time.hour as u32, time.minute as u32, 0)?;
-            let scheduled_datetime = today.and_time(scheduled_time);
+            let _scheduled_datetime = today.and_time(scheduled_time);
             
             // Convert to local datetime
             let scheduled_local = chrono::Local::now()

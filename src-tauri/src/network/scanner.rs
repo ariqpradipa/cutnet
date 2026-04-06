@@ -11,7 +11,7 @@ use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinSet;
 
 use crate::network::types::{Device, NetworkError, Result};
-use crate::network::utils::{format_mac, generate_network_range, mac_to_vendor};
+use crate::network::utils::{format_mac, generate_network_range, get_hostname, mac_to_vendor};
 
 const ARP_TIMEOUT_MS: u64 = 2000;
 #[allow(dead_code)]
@@ -136,12 +136,17 @@ async fn receive_arp_replies(
                                 let ip_str = sender_ip.to_string();
                                 let mac_str = format_mac(&sender_mac.octets());
 
-                                let vendor = mac_to_vendor(&mac_str);
-
-                                let device = Device::new(ip_str.clone(), mac_str.clone())
-                                    .with_vendor(vendor.unwrap_or_default());
-
+                                let vendor = mac_to_vendor(&mac_str).unwrap_or_else(|| "Unknown".to_string());
+                                let hostname_future = get_hostname(&ip_str);
+                                
                                 let mut devices = discovered.lock().await;
+                                let mut device = Device::new(ip_str.clone(), mac_str.clone())
+                                    .with_vendor(vendor);
+                                
+                                if let Some(hostname) = hostname_future {
+                                    device = device.with_hostname(hostname);
+                                }
+                                
                                 devices.insert(ip_str, device);
                             }
                         }
@@ -258,8 +263,14 @@ pub async fn ping_scan(interface_name: &str) -> Result<Vec<Device>> {
     let devices: Vec<Device> = arp_table
         .into_iter()
         .map(|(ip, mac)| {
-            let vendor = mac_to_vendor(&mac);
-            Device::new(ip, mac).with_vendor(vendor.unwrap_or_default())
+            let vendor = mac_to_vendor(&mac).unwrap_or_else(|| "Unknown".to_string());
+            let hostname = get_hostname(&ip);
+            
+            let mut device = Device::new(&ip, &mac).with_vendor(vendor);
+            if let Some(h) = hostname {
+                device = device.with_hostname(h);
+            }
+            device
         })
         .collect();
 
