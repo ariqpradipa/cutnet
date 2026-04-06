@@ -3,6 +3,8 @@
 //! This module defines the main data types used throughout CutNet for
 //! representing network devices, interfaces, and operational states.
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 
 /// Represents a network device discovered on the local network
@@ -370,6 +372,7 @@ pub struct ForwardingRule {
 
 /// Configuration for packet forwarding
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct ForwardingConfig {
     pub enabled: bool,
     pub victim_mac: String,
@@ -435,7 +438,7 @@ impl ConnectionInfo {
 // ===== Kill Target Types (MAC-based Persistent Tracking) =====
 
 /// Represents a kill target - tracks by MAC with mutable IP
-/// 
+///
 /// This structure is MAC-centric to prevent DHCP/IP renewal bypass.
 /// The MAC address is hardware-based and constant, while IP can change.
 #[derive(Debug, Clone, Serialize, Deserialize)]

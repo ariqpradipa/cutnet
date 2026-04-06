@@ -5,6 +5,8 @@
 //! this persistence ensures killed devices remain blocked across restarts.
 //! MAC addresses are tracked to prevent DHCP/IP renewal bypass.
 
+#![allow(dead_code)]
+
 use crate::network::types::PersistentKillTarget;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

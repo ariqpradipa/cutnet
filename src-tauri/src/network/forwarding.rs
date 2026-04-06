@@ -3,6 +3,8 @@
 //! This module handles enabling/disabling IP forwarding at the system level
 //! for Linux, macOS, and Windows platforms.
 
+#![allow(dead_code)]
+
 use crate::network::types::{NetworkError, Result};
 
 /// Check if IP forwarding is currently enabled on the system

@@ -3,6 +3,8 @@
 //! This module manages schedule persistence to disk and provides
 //! thread-safe CRUD operations for managing device schedules.
 
+#![allow(dead_code)]
+
 use crate::network::types::{DayOfWeek, KillSchedule, ScheduleAction, ScheduleType};
 use crate::network::NetworkError;
 use chrono::Datelike;

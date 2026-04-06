@@ -4,6 +4,8 @@
 //! and the router during ARP poisoning. It captures packets, determines direction,
 //! applies filtering rules, and forwards them to the correct destination.
 
+#![allow(dead_code)]
+
 use crate::network::types::{
     ForwardAction, ForwardStats, ForwardingConfig, ForwardingRule, NetworkError, PacketDirection,
     Protocol, Result,

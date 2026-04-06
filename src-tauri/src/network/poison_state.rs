@@ -3,6 +3,8 @@
 //! Saves active targets to ~/.cutnet/poisoning_state.json.
 //! On app startup, restores and sends ARP replies to unpoison stale targets.
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;

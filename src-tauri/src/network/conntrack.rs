@@ -3,6 +3,8 @@
 //! This module implements connection tracking for TCP and UDP flows,
 //! including TCP state machine transitions and cleanup of stale connections.
 
+#![allow(dead_code)]
+
 use crate::network::types::{
     ConnectionInfo, NetworkError, Protocol, Result, TcpState,
 };

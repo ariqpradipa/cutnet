@@ -3,6 +3,8 @@
 //! This module provides a tokio-based scheduler that periodically checks
 //! for scheduled actions and executes them at the appropriate times.
 
+#![allow(dead_code)]
+
 use crate::network::schedules::{get_enabled_schedules, delete_schedule, get_next_execution};
 use crate::network::types::{KillSchedule, ScheduleAction, ScheduleType};
 use std::sync::Arc;

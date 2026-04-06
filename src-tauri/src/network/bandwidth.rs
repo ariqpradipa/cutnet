@@ -5,6 +5,8 @@
 //! - macOS: dnctl + pfctl (dummynet pipes)
 //! - Windows: PowerShell QoS policies with netsh
 
+#![allow(dead_code)]
+
 use crate::network::types::NetworkError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
