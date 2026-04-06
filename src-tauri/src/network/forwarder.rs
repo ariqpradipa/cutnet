@@ -6,16 +6,16 @@
 
 use crate::network::types::{
     ForwardAction, ForwardStats, ForwardingConfig, ForwardingRule, NetworkError, PacketDirection,
-    Protocol, Result, TcpState,
+    Protocol, Result,
 };
 use pnet_datalink::{Channel, Config, DataLinkReceiver, DataLinkSender, NetworkInterface};
 use pnet_packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
 use pnet_packet::ipv4::{Ipv4Packet, MutableIpv4Packet};
-use pnet_packet::tcp::{MutableTcpPacket, TcpFlags, TcpPacket};
+use pnet_packet::tcp::{MutableTcpPacket, TcpPacket};
 use pnet_packet::udp::{MutableUdpPacket, UdpPacket};
 use pnet_packet::Packet;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
@@ -65,7 +65,7 @@ pub async fn start_forwarding(
         config.clone(),
         victim_mac.clone(),
         router_mac,
-        interface_name,
+        interface_name.clone(),
         stop_rx,
     ));
 
@@ -255,13 +255,14 @@ async fn forwarding_loop(
         }
     };
 
-    let (mut tx, mut rx) = match create_forwarding_channel(&interface) {
+    let (mut tx, rx) = match create_forwarding_channel(&interface) {
         Ok(channel) => channel,
         Err(e) => {
             log::error!("Failed to create forwarding channel: {}", e);
             return;
         }
     };
+    let rx = Arc::new(Mutex::new(rx));
 
     let my_mac = match interface.mac {
         Some(mac) => mac.octets(),
@@ -273,20 +274,23 @@ async fn forwarding_loop(
 
     log::info!("Forwarding loop started for victim {}", victim_mac);
 
-    let mut rx_opt = Some(rx);
-    
     loop {
-        let rx_ref = rx_opt.as_mut().unwrap();        
         tokio::select! {
             _ = stop_rx.recv() => {
                 log::info!("Forwarding loop received stop signal");
                 break;
             }
-            result = rx_ref.next() => {
+            result = tokio::task::spawn_blocking({
+                let rx = Arc::clone(&rx);
+                move || {
+                    let mut rx_guard = rx.lock().unwrap();
+                    rx_guard.next().map(|p| p.to_vec())
+                }
+            }) => {
                 match result {
-                    Ok(packet) => {
+                    Ok(Ok(packet)) => {
                         if let Err(e) = process_packet(
-                            packet,
+                            &packet,
                             &mut tx,
                             &interface,
                             &victim_mac_bytes,
@@ -297,8 +301,11 @@ async fn forwarding_loop(
                             log::debug!("Packet processing error: {}", e);
                         }
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         log::debug!("Packet receive error: {}", e);
+                    }
+                    Err(e) => {
+                        log::error!("Packet processing task failed: {}", e);
                     }
                 }
             }
@@ -447,7 +454,7 @@ async fn forward_packet(
         let mut eth_packet = MutableEthernetPacket::new(&mut packet_buffer).ok_or_else(|| {
             NetworkError::ForwardingError("Failed to create mutable Ethernet packet".to_string())
         })?;
-        eth_packet.set_destination(new_dest_mac.into());
+        eth_packet.set_destination((*new_dest_mac).into());
     }
 
     if let Some(mut ipv4) = MutableIpv4Packet::new(&mut packet_buffer[14..]) {

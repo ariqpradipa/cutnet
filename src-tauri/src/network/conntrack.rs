@@ -6,7 +6,6 @@
 use crate::network::types::{
     ConnectionInfo, NetworkError, Protocol, Result, TcpState,
 };
-use pnet_packet::ip::IpNextHeaderProtocols;
 use pnet_packet::tcp::TcpFlags;
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
