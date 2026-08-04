@@ -84,8 +84,11 @@ async fn process_schedules(
 
     for schedule in schedules {
         if let Some(next_execution) = get_next_execution(&schedule.id).await {
-            // Check if schedule is due (within the last minute)
-            if next_execution <= now && now - next_execution < 60 {
+            // Execute if the schedule is due.
+            // Use `next_execution <= now` with no upper-bound window — instead we
+            // rely on `schedules::mark_executed` to advance the next execution time
+            // so a schedule is never run twice, even if the tick fires late (#14).
+            if next_execution <= now {
                 log::info!(
                     "Executing schedule {} for device {} ({})",
                     schedule.id,
@@ -104,6 +107,9 @@ async fn process_schedules(
                     } else {
                         log::info!("Deleted one-time schedule {}", schedule.id);
                     }
+                } else {
+                    // Advance the next execution time so this tick is not re-executed
+                    crate::network::schedules::mark_executed(&schedule.id).await;
                 }
             }
         }
