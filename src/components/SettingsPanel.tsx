@@ -159,7 +159,8 @@ export function SettingsPanel({ className, defaultTab = "network" }: SettingsPan
       setAlertLog((prev) => [
         ...prev,
         {
-          id: event.timestamp.toString() + Math.random().toString(36).slice(2),
+          // Use timestamp + mac to produce a unique-enough key for list rendering
+          id: `${event.timestamp}-${event.attacker_mac}-${Math.random().toString(36).slice(2, 7)}`,
           timestamp: new Date(event.timestamp * 1000),
           attackerMac: event.attacker_mac,
           attackerIp: event.claimed_ip,
@@ -517,9 +518,9 @@ export function SettingsPanel({ className, defaultTab = "network" }: SettingsPan
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
-                    <Label htmlFor="refresh-interval">Refresh Interval</Label>
+                    <Label htmlFor="refresh-interval">Scan Refresh Interval</Label>
                     <p className="text-xs text-muted-foreground">
-                      Device list refresh interval in seconds
+                      Auto-scan interval in seconds (applies when auto-scan is enabled in Scan Controls)
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -540,15 +541,16 @@ export function SettingsPanel({ className, defaultTab = "network" }: SettingsPan
 
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
-                    <Label htmlFor="ip-forwarding">IP Forwarding</Label>
+                    <Label htmlFor="ip-forwarding">IP Forwarding (system)</Label>
                     <p className="text-xs text-muted-foreground">
-                      Enable IP packet forwarding
+                      Display only — enable via OS command (see Forwarding tab for instructions)
                     </p>
                   </div>
                   <Switch
                     id="ip-forwarding"
                     checked={ipForwarding}
                     onCheckedChange={setIpForwarding}
+                    disabled
                   />
                 </div>
 
@@ -799,9 +801,8 @@ export function SettingsPanel({ className, defaultTab = "network" }: SettingsPan
                 <Info className="size-3.5" />
                 <AlertTitle>Whitelist protection</AlertTitle>
                 <AlertDescription>
-                  Whitelisted devices are excluded from network scans and will not
-                  appear in the device list. Enable &quot;Protect whitelisted&quot;
-                  to prevent them from being killed.
+                  Whitelisted devices are protected from kill operations. Enable &quot;Protect whitelisted&quot;
+                  to prevent them from being accidentally blocked, even during bulk operations.
                 </AlertDescription>
               </Alert>
 

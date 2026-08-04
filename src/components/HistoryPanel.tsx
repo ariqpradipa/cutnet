@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useMemo } from "react"
 import { getHistory, clearHistory } from "@/utils/ipc"
 import type { HistoryEntry } from "@/lib/schemas"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Table,
@@ -22,7 +23,10 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { Trash2, Clock } from "lucide-react"
+import { Trash2, Clock, RefreshCw, Search, ChevronLeft, ChevronRight, ShieldAlert } from "lucide-react"
+import { cn } from "@/lib/utils"
+
+const PAGE_SIZE = 15
 
 function formatTimestamp(ts: number): string {
   return new Date(ts * 1000).toLocaleString()
@@ -41,8 +45,11 @@ export function HistoryPanel() {
   const [entries, setEntries] = useState<HistoryEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [historySearch, setHistorySearch] = useState("")
+  const [currentPage, setCurrentPage] = useState(1)
 
   const loadHistory = useCallback(async () => {
+    setLoading(true)
     try {
       const data = await getHistory()
       setEntries(data)
@@ -53,17 +60,18 @@ export function HistoryPanel() {
     }
   }, [])
 
-  useEffect(() => {
-    loadHistory()
-  }, [loadHistory])
+  useEffect(() => { loadHistory() }, [loadHistory])
+
+  // Reset page when search changes
+  useEffect(() => { setCurrentPage(1) }, [historySearch])
 
   const handleClear = useCallback(() => {
-    if (entries.length === 0) return;
-    setShowClearConfirm(true);
+    if (entries.length === 0) return
+    setShowClearConfirm(true)
   }, [entries.length])
 
   const confirmClear = useCallback(async () => {
-    setShowClearConfirm(false);
+    setShowClearConfirm(false)
     try {
       await clearHistory()
       setEntries([])
@@ -72,29 +80,52 @@ export function HistoryPanel() {
     }
   }, [])
 
-  const sortedEntries = [...entries].sort(
-    (a, b) => b.join_time - a.join_time
-  )
+  const filteredEntries = useMemo(() => {
+    const sorted = [...entries].sort((a, b) => b.join_time - a.join_time)
+    if (!historySearch.trim()) return sorted
+    const q = historySearch.toLowerCase()
+    return sorted.filter(e =>
+      e.ip.toLowerCase().includes(q) ||
+      e.mac.toLowerCase().includes(q) ||
+      (e.hostname || "").toLowerCase().includes(q) ||
+      (e.vendor || "").toLowerCase().includes(q)
+    )
+  }, [entries, historySearch])
+
+  const totalPages = Math.ceil(filteredEntries.length / PAGE_SIZE)
+  const paginatedEntries = filteredEntries.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Clock className="size-4" />
           <span>{entries.length} event{entries.length !== 1 ? "s" : ""} recorded</span>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleClear}
-          disabled={entries.length === 0}
-        >
-          <Trash2 data-icon="inline-start" />
-          Clear History
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={loadHistory} disabled={loading}>
+            <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+            Refresh
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleClear} disabled={entries.length === 0}>
+            <Trash2 data-icon="inline-start" />
+            Clear History
+          </Button>
+        </div>
       </div>
 
-      <ScrollArea className="h-[400px] rounded-md border">
+      {/* Search */}
+      <div className="relative max-w-sm">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+        <Input
+          placeholder="Filter by IP, MAC, hostname…"
+          value={historySearch}
+          onChange={(e) => setHistorySearch(e.target.value)}
+          className="pl-9 h-8"
+        />
+      </div>
+
+      <ScrollArea className="h-[calc(100vh-22rem)] min-h-[280px] rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
@@ -110,43 +141,50 @@ export function HistoryPanel() {
           </TableHeader>
           <TableBody>
             {loading ? (
+              // Loading skeleton
+              Array.from({ length: 3 }).map((_, i) => (
+                <TableRow key={i}>
+                  {Array.from({ length: 8 }).map((_, j) => (
+                    <TableCell key={j}>
+                      <div className="h-4 bg-muted rounded animate-pulse" />
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
+            ) : filteredEntries.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
-                  Loading history...
-                </TableCell>
-              </TableRow>
-            ) : sortedEntries.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
-                  No history yet. Device sessions will appear here after scanning.
+                  {historySearch
+                    ? "No events match your filter."
+                    : "No history yet. Device sessions will appear here after scanning."}
                 </TableCell>
               </TableRow>
             ) : (
-              sortedEntries.map((entry, idx) => (
+              paginatedEntries.map((entry, idx) => (
                 <TableRow key={`${entry.ip}-${entry.join_time}-${idx}`}>
                   <TableCell>
-                    <Badge variant={entry.leave_time ? "secondary" : "default"}>
-                      {entry.leave_time ? "Left" : "Joined"}
-                    </Badge>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <Badge variant={entry.leave_time ? "secondary" : "default"}>
+                        {entry.leave_time ? "Left" : "Online"}
+                      </Badge>
+                      {entry.was_killed && (
+                        <Badge variant="destructive" className="gap-1">
+                          <ShieldAlert className="size-3" />
+                          Killed
+                        </Badge>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="font-mono text-xs">{entry.ip}</TableCell>
                   <TableCell className="font-mono text-xs">{entry.mac}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {entry.hostname || "Unknown"}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {entry.vendor || "Unknown"}
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    {formatTimestamp(entry.join_time)}
-                  </TableCell>
+                  <TableCell className="text-muted-foreground">{entry.hostname || "—"}</TableCell>
+                  <TableCell className="text-muted-foreground">{entry.vendor || "—"}</TableCell>
+                  <TableCell className="text-xs">{formatTimestamp(entry.join_time)}</TableCell>
                   <TableCell className="text-xs">
                     {entry.leave_time ? formatTimestamp(entry.leave_time) : "—"}
                   </TableCell>
                   <TableCell className="text-xs">
-                    {entry.leave_time
-                      ? formatDuration(entry.join_time, entry.leave_time)
-                      : "Still online"}
+                    {entry.leave_time ? formatDuration(entry.join_time, entry.leave_time) : "Active"}
                   </TableCell>
                 </TableRow>
               ))
@@ -155,13 +193,30 @@ export function HistoryPanel() {
         </Table>
       </ScrollArea>
 
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-1 text-xs text-muted-foreground">
+          <span>
+            Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filteredEntries.length)} of {filteredEntries.length}
+          </span>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon-xs" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>
+              <ChevronLeft className="size-3.5" />
+            </Button>
+            <span className="px-1">Page {currentPage} of {totalPages}</span>
+            <Button variant="ghost" size="icon-xs" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
+              <ChevronRight className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Dialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Clear history?</DialogTitle>
             <DialogDescription>
-              This will permanently delete all {entries.length} recorded event{entries.length !== 1 ? "s" : ""}.
-              This action cannot be undone.
+              This will permanently delete all {entries.length} recorded event{entries.length !== 1 ? "s" : ""}. This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -218,13 +218,15 @@ export function ScanControls() {
     return `${networkParts.join(".")}/${cidr}`
   }, [activeInterface])
 
-  // Get gateway info
+  // Get estimated gateway — network address + 1 (common convention)
   const getGateway = useCallback(() => {
-    // In a real implementation, this would come from the backend
-    // For now, derive from broadcast address (typically .1 in the network)
     if (!activeInterface) return "-"
-    const ipParts = activeInterface.ip.split(".")
-    return `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.1`
+    const ipParts = activeInterface.ip.split(".").map(Number)
+    const maskParts = activeInterface.netmask.split(".").map(Number)
+    if (ipParts.length !== 4 || maskParts.length !== 4) return "-"
+    const networkParts = ipParts.map((o, i) => o & maskParts[i])
+    networkParts[3] = 1
+    return `${networkParts.join(".")} (est.)`
   }, [activeInterface])
 
   return (
@@ -236,31 +238,23 @@ export function ScanControls() {
             <CardTitle>Scan Controls</CardTitle>
           </div>
           <div className="flex items-center gap-2">
-            <label
-              htmlFor="auto-refresh"
-              className="text-xs text-muted-foreground cursor-pointer select-none"
-            >
-              Auto
-            </label>
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="flex items-center gap-2">
-                  <RefreshCw
-                    className={cn(
-                      "h-3 w-3 text-muted-foreground",
-                      autoRefresh && "animate-spin"
-                    )}
-                  />
+                <label
+                  htmlFor="auto-refresh"
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none"
+                >
                   <Checkbox
                     id="auto-refresh"
                     checked={autoRefresh}
                     onCheckedChange={(checked) => setAutoRefresh(!!checked)}
                     disabled={isScanning}
                   />
-                </div>
+                  Auto-scan every 30s
+                </label>
               </TooltipTrigger>
               <TooltipContent side="left">
-                <p>Auto-refresh every 30 seconds</p>
+                <p>Automatically re-scan the network every 30 seconds</p>
               </TooltipContent>
             </Tooltip>
           </div>
@@ -370,11 +364,11 @@ export function ScanControls() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="destructive"
+                  variant="outline"
                   size="sm"
                   onClick={handleStopScan}
                   disabled={!isScanning}
-                  className="gap-1.5"
+                  className="gap-1.5 text-destructive hover:text-destructive"
                 >
                   <Square className="h-3.5 w-3.5 fill-current" />
                   Stop
@@ -412,22 +406,22 @@ export function ScanControls() {
           {isScanning && (
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Scanning...</span>
+                <span className="text-muted-foreground">
+                  {scanProgress ? "Scanning…" : "Starting…"}
+                </span>
                 <span className="font-mono">
-                  {scanProgress
-                    ? `${Math.round(scanProgress.progress)}%`
-                    : "0%"}
+                  {scanProgress ? `${Math.round(scanProgress.progress)}%` : "—"}
                 </span>
               </div>
               <Progress
-                value={scanProgress ? scanProgress.progress : 0}
-                className="h-2"
+                value={scanProgress ? scanProgress.progress : undefined}
+                className={cn("h-2", !scanProgress && "animate-pulse")}
               />
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span>
                   {scanProgress
-                    ? `${scanProgress.devices_found} devices found`
-                    : "Starting scan..."}
+                    ? `${scanProgress.devices_found} device${scanProgress.devices_found !== 1 ? "s" : ""} found`
+                    : "Initializing scan…"}
                 </span>
                 <span>
                   {devices.length > 0 && `${devices.length} total in list`}

@@ -1,5 +1,3 @@
-"use client"
-
 import { useState, useMemo, useCallback, useEffect } from "react"
 import { useDeviceStore } from "@/stores/deviceStore"
 import { useNetworkStore } from "@/stores/networkStore"
@@ -38,7 +36,6 @@ import { Separator } from "@/components/ui/separator"
 import {
   Wifi,
   ShieldAlert,
-  MoreVertical,
   Power,
   PowerOff,
   Info,
@@ -57,9 +54,11 @@ import {
   Gamepad2,
   Server,
   Tv,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useToast } from "@/hooks/useToast"
+import { useToastStore } from "@/hooks/useToast"
 
 function getDeviceIcon(vendor: string | null, hostname: string | null) {
   const vendorLower = (vendor || "").toLowerCase();
@@ -148,7 +147,7 @@ export function DeviceTable() {
     removeBandwidthLimit: removeStoreBandwidthLimit
   } = useDeviceStore()
   const { isScanning } = useNetworkStore()
-  const { toast } = useToast()
+  const { addToast } = useToastStore()
 
   const [sort, setSort] = useState<SortState>({ field: "ip", direction: "asc" })
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
@@ -162,6 +161,8 @@ export function DeviceTable() {
   const [showBandwidthDialog, setShowBandwidthDialog] = useState(false)
   const [selectedBandwidthDevice, setSelectedBandwidthDevice] = useState<Device | null>(null)
   const [bandwidthStats, setBandwidthStats] = useState<BandwidthStats | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const PAGE_SIZE = 20
 
   useEffect(() => {
     const loadNames = async () => {
@@ -200,6 +201,9 @@ export function DeviceTable() {
     [sort]
   )
 
+  // Reset to page 1 when search changes
+  useEffect(() => { setCurrentPage(1) }, [searchQuery])
+
   const filteredAndSortedDevices = useMemo(() => {
     const filtered = devices.filter((device) => {
       if (!searchQuery.trim()) return true
@@ -219,25 +223,31 @@ export function DeviceTable() {
       let comparison = 0
 
       switch (sort.field) {
-        case "status":
+        case "status": {
           const statusA = getDeviceStatus(a, killStates, isScanning).label
           const statusB = getDeviceStatus(b, killStates, isScanning).label
           comparison = statusA.localeCompare(statusB)
           break
-        case "ip":
-          comparison = a.ip.localeCompare(b.ip)
+        }
+        case "ip": {
+          // Numeric sort: convert each octet to a number for correct ordering
+          const toNum = (ip: string) =>
+            ip.split(".").reduce((acc, o) => acc * 256 + parseInt(o, 10), 0)
+          comparison = toNum(a.ip) - toNum(b.ip)
           break
+        }
         case "mac":
           comparison = a.mac.localeCompare(b.mac)
           break
         case "vendor":
           comparison = (a.vendor || "").localeCompare(b.vendor || "")
           break
-        case "hostname":
+        case "hostname": {
           const nameA = customNames[a.ip] || a.hostname || ""
           const nameB = customNames[b.ip] || b.hostname || ""
           comparison = nameA.localeCompare(nameB)
           break
+        }
         default:
           comparison = 0
       }
@@ -263,46 +273,33 @@ export function DeviceTable() {
       try {
         if (wasKilled) {
           await unkillDevice(device);
-          setKillState(device.mac, {
-            mac: device.mac,
-            is_killed: false,
-            kill_type: "none",
-          });
-          toast({ title: "Device restored", description: `${device.ip} is back online`, variant: "default" });
+          setKillState(device.mac, { mac: device.mac, is_killed: false, kill_type: "none" });
+          addToast({ title: "Device restored", description: `${device.ip} is back online`, variant: "default" });
         } else {
           await killDevice(device);
-          setKillState(device.mac, {
-            mac: device.mac,
-            is_killed: true,
-            kill_type: "arp_poison",
-          });
-          toast({ title: "Device killed", description: `${device.ip} has been disconnected`, variant: "destructive" });
+          setKillState(device.mac, { mac: device.mac, is_killed: true, kill_type: "arp_poison" });
+          addToast({ title: "Device killed", description: `${device.ip} has been disconnected`, variant: "destructive" });
         }
       } catch (err) {
-        setKillState(device.mac, {
-          mac: device.mac,
-          is_killed: wasKilled ?? false,
-          kill_type: wasKilled ? "arp_poison" : "none",
-        });
-        console.error(`Failed to ${wasKilled ? 'unkill' : 'kill'} device ${device.ip}:`, err);
-        toast({
+        setKillState(device.mac, { mac: device.mac, is_killed: wasKilled ?? false, kill_type: wasKilled ? "arp_poison" : "none" });
+        addToast({
           title: "Operation failed",
-          description: `Failed to ${wasKilled ? 'restore' : 'kill'} ${device.ip}: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          description: `Failed to ${wasKilled ? "restore" : "kill"} ${device.ip}: ${err instanceof Error ? err.message : "Unknown error"}`,
           variant: "destructive",
         });
       }
     },
-    [killStates, setKillState, toast]
+    [killStates, setKillState, addToast]
   )
 
   const handleKillAll = useCallback(async () => {
     const killableDevices = devices.filter(d => !killStates.get(d.mac)?.is_killed && !d.is_me);
     if (killableDevices.length === 0) {
-      toast({ title: "No devices to kill", description: "All devices are already killed or this is your machine.", variant: "default" });
+      addToast({ title: "No devices to kill", description: "All devices are already killed or this is your machine." });
       return;
     }
     setShowKillAllConfirm(true);
-  }, [devices, killStates]);
+  }, [devices, killStates, addToast]);
 
   const confirmKillAll = useCallback(async () => {
     setShowKillAllConfirm(false);
@@ -310,47 +307,68 @@ export function DeviceTable() {
     try {
       await killAllDevices(killableDevices);
       for (const device of killableDevices) {
-        setKillState(device.mac, {
-          mac: device.mac,
-          is_killed: true,
-          kill_type: "arp_poison",
-        });
+        setKillState(device.mac, { mac: device.mac, is_killed: true, kill_type: "arp_poison" });
       }
-      toast({ title: "All devices killed", description: `${killableDevices.length} device(s) disconnected`, variant: "destructive" });
+      addToast({ title: "All devices killed", description: `${killableDevices.length} device(s) disconnected`, variant: "destructive" });
     } catch (err) {
-      toast({
-        title: "Kill All failed",
-        description: err instanceof Error ? err.message : 'Unknown error',
-        variant: "destructive",
-      });
+      addToast({ title: "Kill All failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     }
-  }, [devices, killStates, setKillState, toast]);
+  }, [devices, killStates, setKillState, addToast]);
 
   const handleUnkillAll = useCallback(async () => {
     const killedDevices = devices.filter(d => killStates.get(d.mac)?.is_killed);
     if (killedDevices.length === 0) {
-      toast({ title: "No devices to restore", description: "No devices are currently killed.", variant: "default" });
+      addToast({ title: "No devices to restore", description: "No devices are currently killed." });
       return;
     }
-
     try {
       await unkillAllDevices();
       for (const device of killedDevices) {
-        setKillState(device.mac, {
-          mac: device.mac,
-          is_killed: false,
-          kill_type: "none",
-        });
+        setKillState(device.mac, { mac: device.mac, is_killed: false, kill_type: "none" });
       }
-      toast({ title: "All devices restored", description: `${killedDevices.length} device(s) reconnected`, variant: "default" });
+      addToast({ title: "All devices restored", description: `${killedDevices.length} device(s) reconnected` });
     } catch (err) {
-      toast({
-        title: "Unkill All failed",
-        description: err instanceof Error ? err.message : 'Unknown error',
-        variant: "destructive",
-      });
+      addToast({ title: "Unkill All failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     }
-  }, [devices, killStates, setKillState, toast]);
+  }, [devices, killStates, setKillState, addToast]);
+
+  const handleKillSelected = useCallback(async () => {
+    const selectedDevices = devices.filter(d => selectedRows.has(d.ip));
+    const failed: string[] = [];
+    for (const device of selectedDevices) {
+      try {
+        await killDevice(device);
+        setKillState(device.mac, { mac: device.mac, is_killed: true, kill_type: "arp_poison" });
+      } catch {
+        failed.push(device.ip);
+      }
+    }
+    if (failed.length > 0) {
+      addToast({ title: "Partial failure", description: `Failed to kill: ${failed.join(", ")}`, variant: "destructive" });
+    } else {
+      addToast({ title: "Devices killed", description: `${selectedDevices.length} device(s) disconnected`, variant: "destructive" });
+    }
+    setSelectedRows(new Set());
+  }, [devices, selectedRows, setKillState, addToast]);
+
+  const handleUnkillSelected = useCallback(async () => {
+    const selectedDevices = devices.filter(d => selectedRows.has(d.ip));
+    const failed: string[] = [];
+    for (const device of selectedDevices) {
+      try {
+        await unkillDevice(device);
+        setKillState(device.mac, { mac: device.mac, is_killed: false, kill_type: "none" });
+      } catch {
+        failed.push(device.ip);
+      }
+    }
+    if (failed.length > 0) {
+      addToast({ title: "Partial failure", description: `Failed to restore: ${failed.join(", ")}`, variant: "destructive" });
+    } else {
+      addToast({ title: "Devices restored", description: `${selectedDevices.length} device(s) reconnected` });
+    }
+    setSelectedRows(new Set());
+  }, [devices, selectedRows, setKillState, addToast]);
 
   const handleSelectAll = useCallback(
     (checked: boolean) => {
@@ -429,46 +447,25 @@ export function DeviceTable() {
   const handleSetBandwidthLimit = useCallback(async (mac: string, download: number | null, upload: number | null) => {
     try {
       await setBandwidthLimit(mac, download, upload)
-      const limit: BandwidthLimit = {
-        mac,
-        download_limit_kbps: download,
-        upload_limit_kbps: upload,
-        enabled: true
-      }
+      const limit: BandwidthLimit = { mac, download_limit_kbps: download, upload_limit_kbps: upload, enabled: true }
       setStoreBandwidthLimit(mac, limit)
-      toast({
-        title: "Bandwidth limit applied",
-        description: `Speed limits set for device`,
-        variant: "default"
-      })
+      addToast({ title: "Bandwidth limit applied", description: `Speed limits set for device` })
     } catch (err) {
-      toast({
-        title: "Failed to apply bandwidth limit",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive"
-      })
+      addToast({ title: "Failed to apply bandwidth limit", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" })
       throw err
     }
-  }, [setStoreBandwidthLimit, toast])
+  }, [setStoreBandwidthLimit, addToast])
 
   const handleRemoveBandwidthLimit = useCallback(async (mac: string) => {
     try {
       await removeBandwidthLimit(mac)
       removeStoreBandwidthLimit(mac)
-      toast({
-        title: "Bandwidth limit removed",
-        description: `Speed limits cleared for device`,
-        variant: "default"
-      })
+      addToast({ title: "Bandwidth limit removed", description: `Speed limits cleared for device` })
     } catch (err) {
-      toast({
-        title: "Failed to remove bandwidth limit",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive"
-      })
+      addToast({ title: "Failed to remove bandwidth limit", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" })
       throw err
     }
-  }, [removeStoreBandwidthLimit, toast])
+  }, [removeStoreBandwidthLimit, addToast])
 
   const getDeviceBandwidthDisplay = useCallback((mac: string) => {
     const limit = bandwidthLimits.get(mac)
@@ -540,82 +537,18 @@ export function DeviceTable() {
             <span className="text-xs text-muted-foreground">
               {selectedRows.size} device{selectedRows.size === 1 ? "" : "s"} selected
             </span>
-            <Button
-              variant="destructive"
-              size="xs"
-              onClick={async () => {
-                const selectedDevices = devices.filter((d) => selectedRows.has(d.ip));
-                const failedDevices: string[] = [];
-
-                for (const device of selectedDevices) {
-                  try {
-                    await killDevice(device);
-                    setKillState(device.mac, {
-                      mac: device.mac,
-                      is_killed: true,
-                      kill_type: "arp_poison",
-                    });
-                  } catch (err) {
-                    failedDevices.push(device.ip);
-                    console.error(`Failed to kill ${device.ip}:`, err);
-                  }
-                }
-
-                if (failedDevices.length > 0) {
-                  toast({
-                    title: "Partial failure",
-                    description: `Failed to kill: ${failedDevices.join(", ")}`,
-                    variant: "destructive",
-                  });
-                } else {
-                  toast({ title: "Devices killed", description: `${selectedDevices.length} device(s) disconnected`, variant: "destructive" });
-                }
-                setSelectedRows(new Set());
-              }}
-            >
+            <Button variant="destructive" size="xs" onClick={handleKillSelected}>
               <PowerOff data-icon="inline-start" />
               Kill Selected
             </Button>
-            <Button
-              variant="outline"
-              size="xs"
-              onClick={async () => {
-                const selectedDevices = devices.filter((d) => selectedRows.has(d.ip));
-                const failedDevices: string[] = [];
-
-                for (const device of selectedDevices) {
-                  try {
-                    await unkillDevice(device);
-                    setKillState(device.mac, {
-                      mac: device.mac,
-                      is_killed: false,
-                      kill_type: "none",
-                    });
-                  } catch (err) {
-                    failedDevices.push(device.ip);
-                    console.error(`Failed to unkill ${device.ip}:`, err);
-                  }
-                }
-
-                if (failedDevices.length > 0) {
-                  toast({
-                    title: "Partial failure",
-                    description: `Failed to restore: ${failedDevices.join(", ")}`,
-                    variant: "destructive",
-                  });
-                } else {
-                  toast({ title: "Devices restored", description: `${selectedDevices.length} device(s) reconnected` });
-                }
-                setSelectedRows(new Set());
-              }}
-            >
+            <Button variant="outline" size="xs" onClick={handleUnkillSelected}>
               <Power data-icon="inline-start" />
               Unkill Selected
             </Button>
           </div>
         )}
 
-        <ScrollArea className="h-[400px] rounded-md border">
+        <ScrollArea className="h-[calc(100vh-22rem)] min-h-[280px] rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -627,50 +560,20 @@ export function DeviceTable() {
                     aria-label="Select all devices"
                   />
                 </TableHead>
-                <TableHead
-                  className="cursor-pointer"
-                  onClick={() => handleSort("status")}
-                >
-                  <div className="flex items-center gap-1">
-                    Status
-                    {getSortIcon("status")}
-                  </div>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("status")}>
+                  <div className="flex items-center gap-1">Status {getSortIcon("status")}</div>
                 </TableHead>
-                <TableHead
-                  className="cursor-pointer"
-                  onClick={() => handleSort("ip")}
-                >
-                  <div className="flex items-center gap-1">
-                    IP Address
-                    {getSortIcon("ip")}
-                  </div>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("ip")}>
+                  <div className="flex items-center gap-1">IP Address {getSortIcon("ip")}</div>
                 </TableHead>
-                <TableHead
-                  className="cursor-pointer"
-                  onClick={() => handleSort("mac")}
-                >
-                  <div className="flex items-center gap-1">
-                    MAC Address
-                    {getSortIcon("mac")}
-                  </div>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("mac")}>
+                  <div className="flex items-center gap-1">MAC Address {getSortIcon("mac")}</div>
                 </TableHead>
-                <TableHead
-                  className="cursor-pointer"
-                  onClick={() => handleSort("vendor")}
-                >
-                  <div className="flex items-center gap-1">
-                    Vendor
-                    {getSortIcon("vendor")}
-                  </div>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("vendor")}>
+                  <div className="flex items-center gap-1">Vendor {getSortIcon("vendor")}</div>
                 </TableHead>
-                <TableHead
-                  className="cursor-pointer"
-                  onClick={() => handleSort("hostname")}
-                >
-                  <div className="flex items-center gap-1">
-                    Hostname
-                    {getSortIcon("hostname")}
-                  </div>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("hostname")}>
+                  <div className="flex items-center gap-1">Hostname {getSortIcon("hostname")}</div>
                 </TableHead>
                 <TableHead className="text-center">
                   <Tooltip>
@@ -680,9 +583,7 @@ export function DeviceTable() {
                         Bandwidth
                       </span>
                     </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Click a device row to set bandwidth limits</p>
-                    </TooltipContent>
+                    <TooltipContent><p>Click to set speed limits for this device</p></TooltipContent>
                   </Tooltip>
                 </TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -691,17 +592,16 @@ export function DeviceTable() {
             <TableBody>
               {filteredAndSortedDevices.length === 0 ? (
                 <TableRow>
-                  <TableCell
-                    colSpan={8}
-                    className="h-24 text-center text-muted-foreground"
-                  >
+                  <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
                     {searchQuery
                       ? "No devices match your search."
                       : "No devices found. Start a scan to discover devices."}
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredAndSortedDevices.map((device) => {
+                filteredAndSortedDevices
+                  .slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+                  .map((device) => {
                   const status = getDeviceStatus(device, killStates, isScanning)
                   const StatusIcon = status.icon
                   const isSelected = selectedDevice?.ip === device.ip
@@ -712,25 +612,20 @@ export function DeviceTable() {
                   return (
                     <TableRow
                       key={device.ip}
-                      className={cn(
-                        "cursor-pointer transition-colors",
-                        isSelected && "bg-muted/70"
-                      )}
+                      className={cn("cursor-pointer transition-colors", isSelected && "bg-muted/70")}
                       onClick={() => handleRowClick(device)}
                       data-state={isSelected ? "selected" : undefined}
                     >
                       <TableCell>
                         <Checkbox
                           checked={selectedRows.has(device.ip)}
-                          onCheckedChange={(checked) =>
-                            handleSelectRow(device.ip, checked as boolean)
-                          }
+                          onCheckedChange={(checked) => handleSelectRow(device.ip, checked as boolean)}
                           onClick={(e) => e.stopPropagation()}
                           aria-label={`Select device ${device.ip}`}
                         />
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 flex-wrap">
                           <Badge variant={status.variant}>
                             <StatusIcon data-icon="inline-start" />
                             {status.label}
@@ -739,8 +634,7 @@ export function DeviceTable() {
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Badge variant="outline" className="text-amber-600 border-amber-300 dark:border-amber-700 dark:text-amber-400">
-                                  <Router data-icon="inline-start" />
-                                  Router
+                                  <Router data-icon="inline-start" />Router
                                 </Badge>
                               </TooltipTrigger>
                               <TooltipContent>Default Gateway</TooltipContent>
@@ -749,25 +643,16 @@ export function DeviceTable() {
                           {device.is_me && (
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <Badge variant="secondary">
-                                  <Monitor data-icon="inline-start" />
-                                  You
-                                </Badge>
+                                <Badge variant="secondary"><Monitor data-icon="inline-start" />You</Badge>
                               </TooltipTrigger>
                               <TooltipContent>This machine</TooltipContent>
                             </Tooltip>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {device.ip}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {device.mac}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {device.vendor || "Unknown"}
-                      </TableCell>
+                      <TableCell className="font-mono text-xs">{device.ip}</TableCell>
+                      <TableCell className="font-mono text-xs">{device.mac}</TableCell>
+                      <TableCell className="text-muted-foreground">{device.vendor || "Unknown"}</TableCell>
                       <TableCell className="text-muted-foreground">
                         {isEditing ? (
                           <Input
@@ -782,29 +667,21 @@ export function DeviceTable() {
                         ) : (
                           <div
                             className="flex items-center gap-1 group cursor-pointer"
-                            onDoubleClick={(e) => {
-                              e.stopPropagation()
-                              startEditingName(device)
-                            }}
+                            onDoubleClick={(e) => { e.stopPropagation(); startEditingName(device) }}
                           >
                             {(() => {
                               const DeviceIcon = getDeviceIcon(device.vendor, displayName);
                               return <DeviceIcon className="size-3 text-muted-foreground shrink-0" />;
                             })()}
-                            <span className="truncate max-w-[120px]">
-                              {displayName}
-                            </span>
+                            <span className="truncate max-w-[120px]">{displayName}</span>
                             <Pencil
                               className="size-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                startEditingName(device)
-                              }}
+                              onClick={(e) => { e.stopPropagation(); startEditingName(device) }}
                             />
                           </div>
                         )}
                       </TableCell>
-                      <TableCell 
+                      <TableCell
                         className="text-center text-muted-foreground text-xs cursor-pointer hover:text-foreground"
                         onClick={(e) => handleOpenBandwidthControl(device, e)}
                       >
@@ -813,9 +690,7 @@ export function DeviceTable() {
                             <TooltipTrigger asChild>
                               <span className="cursor-help">—</span>
                             </TooltipTrigger>
-                            <TooltipContent>
-                              <p>Click to set bandwidth limit</p>
-                            </TooltipContent>
+                            <TooltipContent><p>Click to set speed limit</p></TooltipContent>
                           </Tooltip>
                         )}
                       </TableCell>
@@ -829,46 +704,22 @@ export function DeviceTable() {
                                 onClick={(e) => handleKillToggle(device, e)}
                                 disabled={device.is_me}
                               >
-                                {isKilled ? (
-                                  <Power className="size-3" />
-                                ) : (
-                                  <PowerOff className="size-3" />
-                                )}
+                                {isKilled ? <Power className="size-3" /> : <PowerOff className="size-3" />}
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent>
-                              {isKilled ? "Unkill device" : "Kill device"}
-                            </TooltipContent>
+                            <TooltipContent>{isKilled ? "Restore device" : "Block device"}</TooltipContent>
                           </Tooltip>
-
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
                                 variant="ghost"
                                 size="icon-xs"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  selectDevice(device)
-                                  setShowDetailDialog(true)
-                                }}
+                                onClick={(e) => { e.stopPropagation(); selectDevice(device); setShowDetailDialog(true) }}
                               >
                                 <Info className="size-3" />
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>View details</TooltipContent>
-                          </Tooltip>
-
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon-xs"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <MoreVertical className="size-3" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>More actions</TooltipContent>
                           </Tooltip>
                         </div>
                       </TableCell>
@@ -879,6 +730,34 @@ export function DeviceTable() {
             </TableBody>
           </Table>
         </ScrollArea>
+
+        {/* Pagination */}
+        {filteredAndSortedDevices.length > PAGE_SIZE && (
+          <div className="flex items-center justify-between px-1 text-xs text-muted-foreground">
+            <span>
+              Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filteredAndSortedDevices.length)} of {filteredAndSortedDevices.length} devices
+            </span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft className="size-3.5" />
+              </Button>
+              <span className="px-1">Page {currentPage} of {Math.ceil(filteredAndSortedDevices.length / PAGE_SIZE)}</span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => setCurrentPage(p => Math.min(Math.ceil(filteredAndSortedDevices.length / PAGE_SIZE), p + 1))}
+                disabled={currentPage === Math.ceil(filteredAndSortedDevices.length / PAGE_SIZE)}
+              >
+                <ChevronRight className="size-3.5" />
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       <Dialog open={showDetailDialog} onOpenChange={setShowDetailDialog}>
@@ -982,16 +861,9 @@ export function DeviceTable() {
                   onClick={async () => {
                     try {
                       await addWhitelistEntry(selectedDevice.mac);
-                      toast({
-                        title: "Whitelist",
-                        description: `${selectedDevice.mac} added to whitelist`,
-                      });
+                      addToast({ title: "Whitelist", description: `${selectedDevice.mac} added to whitelist` });
                     } catch (err) {
-                      toast({
-                        title: "Whitelist failed",
-                        description: err instanceof Error ? err.message : "Unknown error",
-                        variant: "destructive",
-                      });
+                      addToast({ title: "Whitelist failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
                     }
                     setShowDetailDialog(false);
                   }}

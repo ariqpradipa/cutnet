@@ -381,3 +381,63 @@ export async function getBandwidthLimits(): Promise<BandwidthLimit[]> {
 export async function getBandwidthStats(mac: string): Promise<BandwidthStats> {
   return await invoke("get_bandwidth_stats", { mac });
 }
+
+// ── Forwarding IPC wrappers ──────────────────────────────────────────────────
+
+export async function startForwarding(
+  victimMac: string,
+  routerMac: string,
+  interfaceName: string
+): Promise<void> {
+  await invoke("start_forwarding", { victimMac, routerMac, interfaceName });
+}
+
+export async function stopForwarding(
+  victimMac: string,
+  routerMac: string,
+  interfaceName: string
+): Promise<void> {
+  await invoke("stop_forwarding", { victimMac, routerMac, interfaceName });
+}
+
+export async function isForwardingActive(
+  victimMac: string,
+  routerMac: string,
+  interfaceName: string
+): Promise<boolean> {
+  return await invoke<boolean>("is_forwarding_active", { victimMac, routerMac, interfaceName });
+}
+
+export async function getForwardingStats(
+  victimMac: string,
+  routerMac: string,
+  interfaceName: string
+): Promise<unknown> {
+  return await invoke("get_forwarding_stats", { victimMac, routerMac, interfaceName });
+}
+
+export async function getForwardingRules(
+  victimMac: string,
+  routerMac: string,
+  interfaceName: string
+): Promise<unknown[]> {
+  return await invoke<unknown[]>("get_forwarding_rules", { victimMac, routerMac, interfaceName });
+}
+
+export async function addForwardingRule(
+  victimMac: string,
+  routerMac: string,
+  interfaceName: string,
+  rule: { id: string; protocol: string; port: number | null; action: string; description?: string }
+): Promise<void> {
+  await invoke("add_forwarding_rule", { victimMac, routerMac, interfaceName, rule });
+}
+
+export async function removeForwardingRule(
+  victimMac: string,
+  routerMac: string,
+  interfaceName: string,
+  ruleId: string
+): Promise<boolean> {
+  return await invoke<boolean>("remove_forwarding_rule", { victimMac, routerMac, interfaceName, ruleId });
+}

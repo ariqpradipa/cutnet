@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Gauge, ArrowDown, ArrowUp, Trash2, Save } from "lucide-react"
+import { Gauge, ArrowDown, ArrowUp, Trash2, Save, Loader2 } from "lucide-react"
 
 interface BandwidthLimit {
   mac: string
@@ -254,10 +254,12 @@ export function BandwidthControl({
             </div>
           )}
 
-          {/* Permission Warning */}
-          <div className="rounded-md bg-amber-500/10 p-3 text-sm text-amber-600">
-            Note: Bandwidth control requires administrator/root privileges to modify network rules.
-          </div>
+          {/* Permission Warning — only show when no limit is set yet */}
+          {!hasLimit && (
+            <div className="rounded-md bg-amber-500/10 border border-amber-500/20 p-3 text-sm text-amber-600 dark:text-amber-400">
+              Note: Bandwidth control requires administrator/root privileges to modify network rules.
+            </div>
+          )}
         </div>
 
         <DialogFooter className="gap-2">
@@ -272,13 +274,9 @@ export function BandwidthControl({
               Remove Limit
             </Button>
           )}
-          <Button
-            onClick={handleApply}
-            disabled={isLoading}
-            className="gap-2"
-          >
-            <Save className="size-4" />
-            {isLoading ? "Applying..." : "Apply Limit"}
+          <Button onClick={handleApply} disabled={isLoading} className="gap-2">
+            {isLoading ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+            {isLoading ? "Applying…" : "Apply Limit"}
           </Button>
         </DialogFooter>
       </DialogContent>
