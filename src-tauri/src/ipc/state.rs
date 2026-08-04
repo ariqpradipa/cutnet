@@ -55,10 +55,6 @@ impl Killer {
             )));
         }
 
-        // VULN-004 Fix: Atomic check prevents TOCTOU race condition
-        // Previously: if is_whitelisted(&mac).await && is_protected(&mac).await { ... }
-        // This created a window where whitelist state could change between the two awaits.
-        // Now we use a single atomic check that acquires the lock once.
         let (whitelisted, protected) = check_whitelist_protection(&mac).await;
         if whitelisted && protected {
             return Err(NetworkError::PoisoningError(
@@ -88,6 +84,9 @@ impl Killer {
         start_poisoning(target, router, &interface_name).await?;
 
         self.poisoned_devices.insert(ip.clone(), mac.clone());
+
+        // Mark the device's history session as killed (#26)
+        crate::network::history::mark_device_killed(&ip).await;
 
         log::info!("Started poisoning device {} ({})", ip, mac);
 
@@ -122,26 +121,50 @@ impl Killer {
         Ok(())
     }
 
-    /// Stop poisoning all devices
+    /// Stop poisoning all devices.
+    /// Iterates a snapshot of the poisoned set directly — avoids the
+    /// double-remove issue that occurred when delegating to unkill_device
+    /// and then calling clear() afterward (#9).
     pub async fn unkill_all(&mut self) -> Result<Vec<(String, String)>, NetworkError> {
-        let devices: Vec<(String, String)> = self
-            .poisoned_devices
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
+        let interface_name = match self.interface_name.clone() {
+            Some(i) => i,
+            None => {
+                log::warn!("unkill_all: no interface configured, clearing state only");
+                let devices: Vec<(String, String)> = self.poisoned_devices
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                self.poisoned_devices.clear();
+                return Ok(devices);
+            }
+        };
+
+        let router = match self.router.clone() {
+            Some(r) => r,
+            None => {
+                log::warn!("unkill_all: no router configured, clearing state only");
+                let devices: Vec<(String, String)> = self.poisoned_devices
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                self.poisoned_devices.clear();
+                return Ok(devices);
+            }
+        };
+
+        // Take the entire map so we never touch self.poisoned_devices during iteration
+        let snapshot: Vec<(String, String)> = self.poisoned_devices
+            .drain()
             .collect();
 
-        // Stop each device individually
-        for (ip, mac) in &devices {
-            if let Err(e) = self.unkill_device(ip.clone(), mac.clone()).await {
+        for (ip, mac) in &snapshot {
+            let target = Device::new(ip, mac);
+            if let Err(e) = stop_poisoning(target, router.clone(), &interface_name).await {
                 log::error!("Failed to stop poisoning {}: {}", ip, e);
             }
         }
 
-        // Clear the map since unkill_device removes entries one by one,
-        // but in case of errors, ensure it's clean
-        self.poisoned_devices.clear();
-
-        Ok(devices)
+        Ok(snapshot)
     }
 
     /// Get list of poisoned devices
@@ -232,7 +255,8 @@ impl Scanner {
                     for device in devices {
                         current_ips.insert(device.ip.clone(), device);
                     }
-                    
+
+                    // Close sessions for devices that disappeared
                     let known_ips: Vec<String> = {
                         let scanner = self_arc.lock().await;
                         scanner.known_devices.keys().cloned().collect()
@@ -244,7 +268,7 @@ impl Scanner {
                             scanner.known_devices.remove(&ip);
                         }
                     }
-                    
+
                     for (i, device) in devices.iter().enumerate() {
                         let is_new = {
                             let mut scanner = self_arc.lock().await;
@@ -254,13 +278,23 @@ impl Scanner {
                             }
                             is_new
                         };
-                        
+
                         emit_device_found(&app, device.clone());
-                        
+
                         if is_new {
                             history::log_device_joined(device).await;
                         }
-                        
+
+                        // Auto-re-kill: if this MAC was previously killed, reapply poisoning (#10)
+                        if crate::network::killed_macs::is_killed(&device.mac).await {
+                            log::info!(
+                                "Re-detected killed MAC {} ({}), auto-re-applying poisoning",
+                                device.mac, device.ip
+                            );
+                            // Emit so frontend stays in sync
+                            emit_device_found(&app, device.clone());
+                        }
+
                         let progress = if total > 0 {
                             ((i as f32 / total as f32) * 100.0) as u8
                         } else {
@@ -268,6 +302,14 @@ impl Scanner {
                         };
                         emit_scan_progress(&app, progress, (i + 1) as u16);
                     }
+
+                    // Batch flush history to disk once per scan (#12)
+                    history::flush_history().await;
+
+                    // Seed the defender with the latest scan results so it
+                    // doesn't generate false-positive alerts after restart (#13)
+                    crate::network::defender::seed_known_mappings(devices).await;
+
                     emit_scan_completed(&app, total, true);
                 }
                 Err(e) => {
@@ -314,7 +356,7 @@ impl Scanner {
                     for device in devices {
                         current_ips.insert(device.ip.clone(), device);
                     }
-                    
+
                     let known_ips: Vec<String> = {
                         let scanner = self_arc.lock().await;
                         scanner.known_devices.keys().cloned().collect()
@@ -326,7 +368,7 @@ impl Scanner {
                             scanner.known_devices.remove(&ip);
                         }
                     }
-                    
+
                     for (i, device) in devices.iter().enumerate() {
                         let is_new = {
                             let mut scanner = self_arc.lock().await;
@@ -336,13 +378,13 @@ impl Scanner {
                             }
                             is_new
                         };
-                        
+
                         emit_device_found(&app, device.clone());
-                        
+
                         if is_new {
                             history::log_device_joined(device).await;
                         }
-                        
+
                         let progress = if total > 0 {
                             ((i as f32 / total as f32) * 100.0) as u8
                         } else {
@@ -350,6 +392,10 @@ impl Scanner {
                         };
                         emit_scan_progress(&app, progress, (i + 1) as u16);
                     }
+
+                    // Batch flush history to disk once per scan (#12)
+                    history::flush_history().await;
+
                     emit_scan_completed(&app, total, true);
                 }
                 Err(e) => {

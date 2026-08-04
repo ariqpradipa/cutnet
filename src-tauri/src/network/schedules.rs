@@ -345,3 +345,19 @@ pub async fn get_enabled_schedules() -> Vec<KillSchedule> {
     let all = manager.get_all_schedules().await;
     all.into_iter().filter(|s| s.enabled).collect()
 }
+
+/// Mark a recurring schedule as having just been executed.
+///
+/// For `Daily` and `Weekly` schedules this updates an internal marker so
+/// `get_next_execution` returns the *next* future slot rather than the same
+/// slot on the very next scheduler tick — prevents missed-window re-runs (#14).
+pub async fn mark_executed(id: &str) {
+    let mut manager = SCHEDULES.write().await;
+    if let Some(schedule) = manager.schedules.get_mut(id) {
+        // Advance created_at to "now" so calculate_next_execution always
+        // yields a time strictly after the current moment.
+        let now = chrono::Local::now().timestamp() as u64;
+        schedule.created_at = now;
+    }
+    let _ = manager.save();
+}

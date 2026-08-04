@@ -275,8 +275,8 @@ async fn send_restore_packets(
 
     let (mut tx, _) = create_poison_channel(&interface)?;
 
-    let target_mac = parse_mac_bytes(&target.mac)?;
-    let router_mac = parse_mac_bytes(&router.mac)?;
+    let target_mac = crate::network::utils::parse_mac(&target.mac)?;
+    let router_mac = crate::network::utils::parse_mac(&router.mac)?;
     let target_ip = target
         .ip
         .parse()
@@ -330,8 +330,8 @@ pub async fn send_single_restore(
 
     let (mut tx, _) = create_poison_channel(&interface)?;
 
-    let target_mac = parse_mac_bytes(&target.mac)?;
-    let router_mac = parse_mac_bytes(&router.mac)?;
+    let target_mac = crate::network::utils::parse_mac(&target.mac)?;
+    let router_mac = crate::network::utils::parse_mac(&router.mac)?;
     let target_ip = target
         .ip
         .parse()
@@ -386,8 +386,8 @@ pub async fn poison_once(
 
     let (mut tx, _) = create_poison_channel(&interface)?;
 
-    let dest_mac = parse_mac_bytes(target_mac)?;
-    let source_mac = parse_mac_bytes(my_mac)?;
+    let dest_mac = crate::network::utils::parse_mac(target_mac)?;
+    let source_mac = crate::network::utils::parse_mac(my_mac)?;
     let sender_ip = router_ip
         .parse()
         .map_err(|_| NetworkError::InvalidIpAddress(router_ip.to_string()))?;
@@ -430,26 +430,7 @@ fn create_poison_channel(
     }
 }
 
-fn parse_mac_bytes(mac: &str) -> Result<[u8; 6]> {
-    let cleaned: String = mac
-        .to_lowercase()
-        .chars()
-        .filter(|c| c.is_ascii_hexdigit())
-        .collect();
 
-    if cleaned.len() != 12 {
-        return Err(NetworkError::InvalidMacAddress(mac.to_string()));
-    }
-
-    let mut result = [0u8; 6];
-    for i in 0..6 {
-        let byte_str = &cleaned[i * 2..i * 2 + 2];
-        result[i] = u8::from_str_radix(byte_str, 16)
-            .map_err(|_| NetworkError::InvalidMacAddress(mac.to_string()))?;
-    }
-
-    Ok(result)
-}
 
 #[allow(dead_code)]
 pub async fn get_poisoning_state(target_ip: &str, router_ip: &str) -> PoisoningState {

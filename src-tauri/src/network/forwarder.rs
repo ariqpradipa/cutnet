@@ -6,21 +6,22 @@
 
 #![allow(dead_code)]
 
+use std::collections::HashMap;
+use std::time::Duration;
+
+use pnet_datalink::{Channel, Config, DataLinkReceiver, DataLinkSender, NetworkInterface};
+use pnet_packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
+use pnet_packet::ipv4::{Ipv4Packet, MutableIpv4Packet};
+use pnet_packet::tcp::TcpPacket;
+use pnet_packet::udp::UdpPacket;
+use pnet_packet::Packet;
+use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
+
 use crate::network::types::{
     ForwardAction, ForwardStats, ForwardingConfig, ForwardingRule, NetworkError, PacketDirection,
     Protocol, Result,
 };
-use pnet_datalink::{Channel, Config, DataLinkReceiver, DataLinkSender, NetworkInterface};
-use pnet_packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
-use pnet_packet::ipv4::{Ipv4Packet, MutableIpv4Packet};
-use pnet_packet::tcp::{MutableTcpPacket, TcpPacket};
-use pnet_packet::udp::{MutableUdpPacket, UdpPacket};
-use pnet_packet::Packet;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
 
 /// Global forwarding state
 static FORWARDING_STATE: once_cell::sync::Lazy<RwLock<HashMap<String, ForwardingSession>>> =
@@ -36,17 +37,23 @@ pub struct ForwardingSession {
     pub stop_signal: Option<tokio::sync::broadcast::Sender<()>>,
 }
 
+/// Session key uses `|` as separator — safe because MACs use `:` and
+/// interface names cannot contain `|` on any supported platform.
+fn session_key(victim_mac: &str, router_mac: &str, interface_name: &str) -> String {
+    format!("{}|{}|{}", victim_mac, router_mac, interface_name)
+}
+
 /// Initialize packet forwarding for a victim device
 pub async fn start_forwarding(
     victim_mac: String,
     router_mac: String,
     interface_name: String,
 ) -> Result<()> {
-    let session_key = format!("{}-{}-{}-forwarding", victim_mac, router_mac, interface_name);
+    let key = session_key(&victim_mac, &router_mac, &interface_name);
 
     {
         let state = FORWARDING_STATE.read().await;
-        if state.contains_key(&session_key) {
+        if state.contains_key(&key) {
             return Err(NetworkError::ForwardingError(
                 "Forwarding already active for this victim".to_string(),
             ));
@@ -81,7 +88,7 @@ pub async fn start_forwarding(
 
     {
         let mut state = FORWARDING_STATE.write().await;
-        state.insert(session_key, session);
+        state.insert(key, session);
     }
 
     log::info!(
@@ -99,11 +106,11 @@ pub async fn stop_forwarding(
     router_mac: &str,
     interface_name: &str,
 ) -> Result<()> {
-    let session_key = format!("{}-{}-{}-forwarding", victim_mac, router_mac, interface_name);
+    let key = session_key(victim_mac, router_mac, interface_name);
 
     {
         let mut state = FORWARDING_STATE.write().await;
-        if let Some(mut session) = state.remove(&session_key) {
+        if let Some(mut session) = state.remove(&key) {
             if let Some(stop_signal) = session.stop_signal.take() {
                 let _ = stop_signal.send(());
             }
@@ -127,9 +134,9 @@ pub async fn is_forwarding_active(
     router_mac: &str,
     interface_name: &str,
 ) -> bool {
-    let session_key = format!("{}-{}-{}-forwarding", victim_mac, router_mac, interface_name);
+    let key = session_key(victim_mac, router_mac, interface_name);
     let state = FORWARDING_STATE.read().await;
-    state.contains_key(&session_key)
+    state.contains_key(&key)
 }
 
 /// Add a forwarding rule
@@ -139,10 +146,10 @@ pub async fn add_forwarding_rule(
     interface_name: &str,
     rule: ForwardingRule,
 ) -> Result<()> {
-    let session_key = format!("{}-{}-{}-forwarding", victim_mac, router_mac, interface_name);
+    let key = session_key(victim_mac, router_mac, interface_name);
 
     let mut state = FORWARDING_STATE.write().await;
-    if let Some(session) = state.get_mut(&session_key) {
+    if let Some(session) = state.get_mut(&key) {
         session.rules.push(rule);
         Ok(())
     } else {
@@ -159,10 +166,10 @@ pub async fn remove_forwarding_rule(
     interface_name: &str,
     rule_id: &str,
 ) -> Result<bool> {
-    let session_key = format!("{}-{}-{}-forwarding", victim_mac, router_mac, interface_name);
+    let key = session_key(victim_mac, router_mac, interface_name);
 
     let mut state = FORWARDING_STATE.write().await;
-    if let Some(session) = state.get_mut(&session_key) {
+    if let Some(session) = state.get_mut(&key) {
         let initial_len = session.rules.len();
         session.rules.retain(|r| r.id != rule_id);
         Ok(session.rules.len() < initial_len)
@@ -179,10 +186,10 @@ pub async fn get_forwarding_rules(
     router_mac: &str,
     interface_name: &str,
 ) -> Result<Vec<ForwardingRule>> {
-    let session_key = format!("{}-{}-{}-forwarding", victim_mac, router_mac, interface_name);
+    let key = session_key(victim_mac, router_mac, interface_name);
 
     let state = FORWARDING_STATE.read().await;
-    if let Some(session) = state.get(&session_key) {
+    if let Some(session) = state.get(&key) {
         Ok(session.rules.clone())
     } else {
         Err(NetworkError::ForwardingError(
@@ -197,10 +204,10 @@ pub async fn get_forwarding_stats(
     router_mac: &str,
     interface_name: &str,
 ) -> Result<ForwardStats> {
-    let session_key = format!("{}-{}-{}-forwarding", victim_mac, router_mac, interface_name);
+    let key = session_key(victim_mac, router_mac, interface_name);
 
     let state = FORWARDING_STATE.read().await;
-    if let Some(session) = state.get(&session_key) {
+    if let Some(session) = state.get(&key) {
         Ok(session.stats.clone())
     } else {
         Err(NetworkError::ForwardingError(
@@ -209,17 +216,19 @@ pub async fn get_forwarding_stats(
     }
 }
 
-/// Get all active forwarding sessions
+/// Get all active forwarding sessions — returns (victim_mac, router_mac, interface_name)
 pub async fn get_active_sessions() -> Vec<(String, String, String)> {
     let state = FORWARDING_STATE.read().await;
     state
         .keys()
         .filter_map(|key| {
-            let parts: Vec<&str> = key.split('-').collect();
-            if parts.len() >= 3 {
-                Some((parts[0].to_string(), parts[1].to_string(), parts[2].to_string()))
-            } else {
-                None
+            // Key format: "victim_mac|router_mac|interface_name"
+            let mut parts = key.splitn(3, '|');
+            match (parts.next(), parts.next(), parts.next()) {
+                (Some(v), Some(r), Some(i)) => {
+                    Some((v.to_string(), r.to_string(), i.to_string()))
+                }
+                _ => None,
             }
         })
         .collect()
@@ -232,6 +241,7 @@ async fn forwarding_loop(
     interface_name: String,
     mut stop_rx: tokio::sync::broadcast::Receiver<()>,
 ) {
+    // Lookup interface once — avoids repeated syscalls in the hot path (#20)
     let interfaces = pnet_datalink::interfaces();
     let interface = match interfaces.into_iter().find(|iface| iface.name == interface_name) {
         Some(iface) => iface,
@@ -241,56 +251,56 @@ async fn forwarding_loop(
         }
     };
 
-    let victim_mac_bytes = match parse_mac_bytes(&victim_mac) {
+    let victim_mac_bytes = match crate::network::utils::parse_mac(&victim_mac) {
         Ok(bytes) => bytes,
-        Err(e) => {
-            log::error!("Invalid victim MAC address: {}", e);
-            return;
-        }
+        Err(e) => { log::error!("Invalid victim MAC: {}", e); return; }
     };
-
-    let router_mac_bytes = match parse_mac_bytes(&router_mac) {
+    let router_mac_bytes = match crate::network::utils::parse_mac(&router_mac) {
         Ok(bytes) => bytes,
-        Err(e) => {
-            log::error!("Invalid router MAC address: {}", e);
-            return;
-        }
+        Err(e) => { log::error!("Invalid router MAC: {}", e); return; }
+    };
+    let my_mac = match interface.mac {
+        Some(mac) => mac.octets(),
+        None => { log::error!("Interface {} has no MAC", interface_name); return; }
     };
 
     let (mut tx, rx) = match create_forwarding_channel(&interface) {
-        Ok(channel) => channel,
-        Err(e) => {
-            log::error!("Failed to create forwarding channel: {}", e);
-            return;
-        }
+        Ok(ch) => ch,
+        Err(e) => { log::error!("Failed to create forwarding channel: {}", e); return; }
     };
-    let rx = Arc::new(Mutex::new(rx));
 
-    let my_mac = match interface.mac {
-        Some(mac) => mac.octets(),
-        None => {
-            log::error!("Interface {} has no MAC", interface_name);
-            return;
+    // Move the blocking DataLinkReceiver onto a dedicated OS thread.
+    // A std::sync::Mutex + spawn_blocking causes the tokio select! to starve;
+    // using a dedicated thread + channel avoids that completely.
+    let (pkt_tx, mut pkt_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(256);
+    let recv_handle = std::thread::spawn(move || {
+        let mut rx = rx;
+        loop {
+            match rx.next() {
+                Ok(pkt) => {
+                    if pkt_tx.blocking_send(pkt.to_vec()).is_err() {
+                        // Channel closed — main loop exited
+                        break;
+                    }
+                }
+                Err(_) => {
+                    // Timeout or transient error — keep looping
+                }
+            }
         }
-    };
+    });
 
     log::info!("Forwarding loop started for victim {}", victim_mac);
 
     loop {
         tokio::select! {
             _ = stop_rx.recv() => {
-                log::info!("Forwarding loop received stop signal");
+                log::info!("Forwarding loop received stop signal for {}", victim_mac);
                 break;
             }
-            result = tokio::task::spawn_blocking({
-                let rx = Arc::clone(&rx);
-                move || {
-                    let mut rx_guard = rx.lock().unwrap();
-                    rx_guard.next().map(|p| p.to_vec())
-                }
-            }) => {
-                match result {
-                    Ok(Ok(packet)) => {
+            maybe_pkt = pkt_rx.recv() => {
+                match maybe_pkt {
+                    Some(packet) => {
                         if let Err(e) = process_packet(
                             &packet,
                             &mut tx,
@@ -303,16 +313,16 @@ async fn forwarding_loop(
                             log::debug!("Packet processing error: {}", e);
                         }
                     }
-                    Ok(Err(e)) => {
-                        log::debug!("Packet receive error: {}", e);
-                    }
-                    Err(e) => {
-                        log::error!("Packet processing task failed: {}", e);
-                    }
+                    None => break, // recv thread exited
                 }
             }
         }
     }
+
+    // Dropping pkt_tx (already moved into recv thread) unblocks blocking_send → thread exits
+    drop(pkt_rx);
+    // Best-effort join — ignore if already finished
+    let _ = recv_handle.join();
 
     log::info!("Forwarding loop stopped for victim {}", victim_mac);
 }
@@ -403,13 +413,10 @@ async fn check_forwarding_rules(
         _ => (Protocol::All, 0, 0),
     };
 
-    let session_key = format!(
-        "{}-{}-{}-forwarding",
-        config.victim_mac, config.router_mac, config.interface_name
-    );
+    let key = session_key(&config.victim_mac, &config.router_mac, &config.interface_name);
 
     let state = FORWARDING_STATE.read().await;
-    if let Some(session) = state.get(&session_key) {
+    if let Some(session) = state.get(&key) {
         for rule in &session.rules {
             let protocol_matches = rule.protocol == Protocol::All || rule.protocol == packet_protocol;
 
@@ -452,6 +459,7 @@ async fn forward_packet(
 ) -> Result<()> {
     let mut packet_buffer = original_packet.to_vec();
 
+    // Rewrite destination MAC
     {
         let mut eth_packet = MutableEthernetPacket::new(&mut packet_buffer).ok_or_else(|| {
             NetworkError::ForwardingError("Failed to create mutable Ethernet packet".to_string())
@@ -459,33 +467,68 @@ async fn forward_packet(
         eth_packet.set_destination((*new_dest_mac).into());
     }
 
-    if let Some(mut ipv4) = MutableIpv4Packet::new(&mut packet_buffer[14..]) {
-        ipv4.set_checksum(pnet_packet::ipv4::checksum(&ipv4.to_immutable()));
+    // Recalculate IPv4 + transport checksums in-place
+    // We operate directly on packet_buffer so every write is visible at send time.
+    if packet_buffer.len() > 14 {
+        let ip_src;
+        let ip_dst;
+        let next_proto;
 
-        let protocol = ipv4.get_next_level_protocol();
-        let payload = ipv4.payload().to_vec();
+        // Scope: read IP header fields, then rewrite checksum
+        {
+            let ipv4 = MutableIpv4Packet::new(&mut packet_buffer[14..]).ok_or_else(|| {
+                NetworkError::ForwardingError("Failed to parse IPv4 packet".to_string())
+            })?;
+            ip_src = ipv4.get_source();
+            ip_dst = ipv4.get_destination();
+            next_proto = ipv4.get_next_level_protocol();
+            // Recalculate and write IPv4 header checksum
+            let checksum = pnet_packet::ipv4::checksum(&ipv4.to_immutable());
+            drop(ipv4);
+            // Re-borrow to write the checksum field
+            if let Some(mut ipv4_mut) = MutableIpv4Packet::new(&mut packet_buffer[14..]) {
+                ipv4_mut.set_checksum(checksum);
+            }
+        }
 
-        match protocol {
+        // Recalculate transport-layer checksum in-place
+        let ip_header_len = {
+            Ipv4Packet::new(&packet_buffer[14..])
+                .map(|p| p.get_header_length() as usize * 4)
+                .unwrap_or(20)
+        };
+        let transport_start = 14 + ip_header_len;
+
+        match next_proto {
             pnet_packet::ip::IpNextHeaderProtocols::Tcp => {
-                if let Some(mut tcp) = MutableTcpPacket::new(&mut payload.clone()) {
-                    tcp.set_checksum(0);
-                    let checksum = pnet_packet::tcp::ipv4_checksum(
-                        &tcp.to_immutable(),
-                        &ipv4.get_source(),
-                        &ipv4.get_destination(),
-                    );
-                    tcp.set_checksum(checksum);
+                if packet_buffer.len() > transport_start {
+                    // Compute checksum from immutable view
+                    let checksum = {
+                        let tcp_slice = &packet_buffer[transport_start..];
+                        TcpPacket::new(tcp_slice)
+                            .map(|tcp| pnet_packet::tcp::ipv4_checksum(&tcp, &ip_src, &ip_dst))
+                            .unwrap_or(0)
+                    };
+                    // Write checksum back (bytes 16-17 of TCP header)
+                    if packet_buffer.len() >= transport_start + 18 {
+                        packet_buffer[transport_start + 16] = (checksum >> 8) as u8;
+                        packet_buffer[transport_start + 17] = checksum as u8;
+                    }
                 }
             }
             pnet_packet::ip::IpNextHeaderProtocols::Udp => {
-                if let Some(mut udp) = MutableUdpPacket::new(&mut payload.clone()) {
-                    udp.set_checksum(0);
-                    let checksum = pnet_packet::udp::ipv4_checksum(
-                        &udp.to_immutable(),
-                        &ipv4.get_source(),
-                        &ipv4.get_destination(),
-                    );
-                    udp.set_checksum(checksum);
+                if packet_buffer.len() > transport_start {
+                    let checksum = {
+                        let udp_slice = &packet_buffer[transport_start..];
+                        UdpPacket::new(udp_slice)
+                            .map(|udp| pnet_packet::udp::ipv4_checksum(&udp, &ip_src, &ip_dst))
+                            .unwrap_or(0)
+                    };
+                    // Write checksum back (bytes 6-7 of UDP header)
+                    if packet_buffer.len() >= transport_start + 8 {
+                        packet_buffer[transport_start + 6] = (checksum >> 8) as u8;
+                        packet_buffer[transport_start + 7] = checksum as u8;
+                    }
                 }
             }
             _ => {}
@@ -493,7 +536,6 @@ async fn forward_packet(
     }
 
     let _ = tx.send_to(&packet_buffer, Some(interface.clone()));
-
     Ok(())
 }
 
@@ -517,23 +559,3 @@ fn create_forwarding_channel(
     }
 }
 
-fn parse_mac_bytes(mac: &str) -> Result<[u8; 6]> {
-    let cleaned: String = mac
-        .to_lowercase()
-        .chars()
-        .filter(|c| c.is_ascii_hexdigit())
-        .collect();
-
-    if cleaned.len() != 12 {
-        return Err(NetworkError::InvalidMacAddress(mac.to_string()));
-    }
-
-    let mut result = [0u8; 6];
-    for i in 0..6 {
-        let byte_str = &cleaned[i * 2..i * 2 + 2];
-        result[i] = u8::from_str_radix(byte_str, 16)
-            .map_err(|_| NetworkError::InvalidMacAddress(mac.to_string()))?;
-    }
-
-    Ok(result)
-}
