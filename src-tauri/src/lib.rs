@@ -14,7 +14,16 @@ pub fn run() {
 
     rt.block_on(async {
         let _ = crate::network::poison_state::recover_from_crash().await;
-        let _ = crate::network::apply_saved_limits().await;
+
+        // Initialize BandwidthController with the active interface before
+        // loading saved limits — without this the controller is None and
+        // every bandwidth command silently fails (#7 / #32).
+        if let Ok(iface) = crate::network::scanner::get_current_interface() {
+            crate::network::bandwidth::init_bandwidth_controller(&iface.name).await;
+            let _ = crate::network::apply_saved_limits().await;
+        } else {
+            log::warn!("Could not detect active interface — bandwidth limits not restored");
+        }
     });
 
     let (killer_state, scanner_state) = init_state();
