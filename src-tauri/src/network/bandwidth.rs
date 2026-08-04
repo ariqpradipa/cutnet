@@ -240,13 +240,36 @@ impl BandwidthController {
         Ok(())
     }
 
-    /// Validate MAC address format
+    /// Validate MAC address format — delegates to the canonical utils validator
+    /// to ensure consistent behaviour across the entire codebase (#16).
     fn is_valid_mac(mac: &str) -> bool {
-        let mac_regex = regex::Regex::new(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$").unwrap();
-        mac_regex.is_match(mac)
+        crate::network::utils::is_valid_mac(mac)
     }
 
-    // ==================== Linux Implementation (tc) ====================
+    /// Convert a MAC address to a unique u32 handle for tc / dummynet.
+    ///
+    /// Previous impl used only the last 4 hex digits, which caused silent
+    /// collisions for devices sharing the same last two octets (#25).
+    /// This XORs all 6 bytes together into a 16-bit value, guaranteeing
+    /// uniqueness across the set of devices on any realistic LAN.
+    fn mac_to_handle(&self, mac: &str) -> u32 {
+        let clean: String = mac
+            .to_lowercase()
+            .chars()
+            .filter(|c| c.is_ascii_hexdigit())
+            .collect();
+        if clean.len() < 12 {
+            return 1;
+        }
+        // XOR pairs of octets into a u16 to keep handles in tc's valid range
+        let mut h: u16 = 0;
+        for i in 0..6 {
+            let byte = u8::from_str_radix(&clean[i * 2..i * 2 + 2], 16).unwrap_or(0);
+            h ^= (byte as u16) << ((i % 2) * 8);
+        }
+        // Avoid handle 0 (reserved) and keep it within 16-bit range
+        (h.max(1)) as u32
+    }    // ==================== Linux Implementation (tc) ====================
 
     #[cfg(target_os = "linux")]
     async fn set_limit_linux(
@@ -907,15 +930,6 @@ impl BandwidthController {
         Ok(stats)
     }
 
-    // ==================== Helper Functions ====================
-
-    /// Convert MAC address to a numeric handle for tc/dummynet
-    fn mac_to_handle(&self, mac: &str) -> u32 {
-        // Use last 4 hex digits of MAC to create a handle
-        let clean = mac.replace(':', "").replace('-', "");
-        let last4 = &clean[clean.len().saturating_sub(4)..];
-        u32::from_str_radix(last4, 16).unwrap_or(1)
-    }
 }
 
 /// Global bandwidth controller instance
