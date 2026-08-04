@@ -3,7 +3,6 @@ import {
   onDeviceKilled,
   onDeviceRestored,
   onError,
-  onDeviceUpdate,
   onDeviceFound,
   onDeviceLost,
   onScanCompleted,
@@ -11,7 +10,6 @@ import {
   type DeviceKilledEvent,
   type DeviceRestoredEvent,
   type IpcErrorEvent,
-  type DeviceUpdateEvent,
   type DeviceFoundEvent,
   type DeviceLostEvent,
   type ScanCompletedEvent,
@@ -25,10 +23,13 @@ import { useToastStore } from "@/hooks/useToast";
  * Custom hook that sets up all Tauri IPC event listeners.
  * Listens for device state changes, scan events, errors, and defender alerts.
  * Cleans up all listeners on unmount.
+ *
+ * NOTE: The generic `device-update` event is intentionally NOT registered here.
+ * The Rust backend only emits `device-found` and `device-lost` — the generic
+ * event was never emitted and its listener caused double-add on device discovery.
  */
 export function useTauriEvents() {
-  const { setKillState, addDevice, updateDevice, removeDevice } =
-    useDeviceStore();
+  const { setKillState, addDevice, removeDevice } = useDeviceStore();
   const { setScanning } = useNetworkStore();
   const { addToast } = useToastStore();
 
@@ -36,20 +37,18 @@ export function useTauriEvents() {
     const unlisteners: (() => void)[] = [];
 
     // Device killed → update kill state to active
-    const unlistenDeviceKilled = onDeviceKilled(
-      (event: DeviceKilledEvent) => {
-        setKillState(event.mac, {
-          mac: event.mac,
-          is_killed: true,
-          kill_type: "arp_poison",
-        });
-        addToast({
-          title: "Device Killed",
-          description: `${event.ip} (${event.mac}) has been disconnected`,
-          variant: "destructive",
-        });
-      }
-    );
+    const unlistenDeviceKilled = onDeviceKilled((event: DeviceKilledEvent) => {
+      setKillState(event.mac, {
+        mac: event.mac,
+        is_killed: true,
+        kill_type: "arp_poison",
+      });
+      addToast({
+        title: "Device Killed",
+        description: `${event.ip} (${event.mac}) has been disconnected`,
+        variant: "destructive",
+      });
+    });
     unlisteners.push(unlistenDeviceKilled);
 
     // Device restored → update kill state to inactive
@@ -78,28 +77,13 @@ export function useTauriEvents() {
     });
     unlisteners.push(unlistenError);
 
-    // Generic device update → update device in store
-    const unlistenDeviceUpdate = onDeviceUpdate(
-      (event: DeviceUpdateEvent) => {
-        const { type, device } = event;
-        if (type === "device_found") {
-          addDevice(device);
-        } else if (type === "device_lost") {
-          removeDevice(device.ip);
-        } else if (type === "device_updated") {
-          updateDevice(device.ip, device);
-        }
-      }
-    );
-    unlisteners.push(unlistenDeviceUpdate);
-
-    // Device found event (legacy)
+    // Device found — single authoritative listener (removed duplicate onDeviceUpdate)
     const unlistenDeviceFound = onDeviceFound((event: DeviceFoundEvent) => {
       addDevice(event.device);
     });
     unlisteners.push(unlistenDeviceFound);
 
-    // Device lost event (legacy)
+    // Device lost
     const unlistenDeviceLost = onDeviceLost((event: DeviceLostEvent) => {
       removeDevice(event.device.ip);
     });
@@ -141,5 +125,5 @@ export function useTauriEvents() {
     return () => {
       unlisteners.forEach((unlisten) => unlisten());
     };
-  }, [setKillState, addDevice, updateDevice, removeDevice, setScanning, addToast]);
+  }, [setKillState, addDevice, removeDevice, setScanning, addToast]);
 }
