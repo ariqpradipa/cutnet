@@ -64,6 +64,23 @@ pub async fn start_defender_monitoring(interface_name: &str, app: &AppHandle) ->
     Ok(())
 }
 
+/// Seed the defender's known IP→MAC mappings from a fresh scan result.
+///
+/// Without this, the defender loses all context on restart and generates
+/// false-positive alerts for the first ARP reply it sees from each device
+/// after a re-start (#13).
+pub async fn seed_known_mappings(devices: &[crate::network::types::Device]) {
+    let mut state = DEFENDER_STATE.write().await;
+    for device in devices {
+        if !device.mac.is_empty() && !device.ip.is_empty() {
+            state.known_mappings
+                .entry(device.ip.clone())
+                .or_insert_with(|| device.mac.clone());
+        }
+    }
+    log::info!("Defender seeded with {} known mappings", state.known_mappings.len());
+}
+
 async fn defender_monitor_loop(interface_name: String, app: AppHandle) {
     let interfaces = pnet_datalink::interfaces();
     let interface = match interfaces.into_iter().find(|iface| iface.name == interface_name) {
@@ -141,6 +158,14 @@ async fn defender_monitor_loop(interface_name: String, app: AppHandle) {
 
                                             let _ = app.emit("arp-spoof-detected", DefenderAlertEvent {
                                                 timestamp: alert.timestamp,
+                                                claimed_ip: alert.claimed_ip.clone(),
+                                                legitimate_mac: alert.legitimate_mac.clone(),
+                                                attacker_mac: alert.attacker_mac.clone(),
+                                                alert_type: alert.alert_type.clone(),
+                                            });
+                                            // Use typed emitter for consistency (#30)
+                                            crate::ipc::events::emit_arp_spoof_detected(&app, crate::ipc::events::ArpSpoofDetectedEvent {
+                                                timestamp: alert.timestamp,
                                                 claimed_ip: alert.claimed_ip,
                                                 legitimate_mac: alert.legitimate_mac,
                                                 attacker_mac: alert.attacker_mac,
@@ -179,7 +204,8 @@ async fn defender_monitor_loop(interface_name: String, app: AppHandle) {
                                             state.alerts.remove(0);
                                         }
 
-                                        let _ = app.emit("arp-spoof-detected", DefenderAlertEvent {
+                                        // Use typed emitter for consistency (#30)
+                                        crate::ipc::events::emit_arp_spoof_detected(&app, crate::ipc::events::ArpSpoofDetectedEvent {
                                             timestamp: alert.timestamp,
                                             claimed_ip: alert.claimed_ip,
                                             legitimate_mac: alert.legitimate_mac,
