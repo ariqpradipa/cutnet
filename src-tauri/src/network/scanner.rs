@@ -41,15 +41,13 @@ pub async fn arp_scan(interface_name: &str) -> Result<Vec<Device>> {
     let (source_ip, prefix_len) = get_network_info(&interface)
         .ok_or_else(|| NetworkError::InterfaceNotFound("No IPv4 on interface".to_string()))?;
 
-    let network_prefix = format!(
-        "{}.{}.{}",
-        source_ip.octets()[0],
-        source_ip.octets()[1],
-        source_ip.octets()[2]
-    );
-
     let netmask = prefix_to_netmask(prefix_len);
-    let ip_range = generate_network_range(&network_prefix, &netmask);
+
+    // Compute the network address (mask the IP) — works for any CIDR
+    let mask_u32 = u32::from(netmask);
+    let network_ip = std::net::Ipv4Addr::from(u32::from(source_ip) & mask_u32);
+
+    let ip_range = generate_network_range(&network_ip.to_string(), &netmask.to_string());
 
     let (mut tx, mut rx) = create_arp_channel(&interface)?;
 
@@ -72,31 +70,29 @@ pub async fn arp_scan(interface_name: &str) -> Result<Vec<Device>> {
         send_arp_requests(&mut tx, &interface, source_ip, my_mac.octets(), &ip_range).await;
     });
 
+    // Wait for sender to finish plus a reply window, then abort the receiver
     let _ = tokio::time::timeout(
         Duration::from_millis(ARP_TIMEOUT_MS),
-        async {
-            let _ = tokio::join!(recv_task, send_task);
-        }
+        send_task,
     ).await;
+
+    // Give remaining replies a chance to arrive
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Explicitly abort receiver — it never exits on its own
+    recv_task.abort();
 
     let devices = discovered.lock().await.values().cloned().collect();
     Ok(devices)
 }
 
-fn prefix_to_netmask(prefix_len: u8) -> String {
+fn prefix_to_netmask(prefix_len: u8) -> std::net::Ipv4Addr {
     let mask = if prefix_len == 0 {
         0u32
     } else {
         0xffffffffu32 << (32 - prefix_len)
     };
-    
-    format!(
-        "{}.{}.{}.{}",
-        (mask >> 24) & 0xff,
-        (mask >> 16) & 0xff,
-        (mask >> 8) & 0xff,
-        mask & 0xff
-    )
+    std::net::Ipv4Addr::from(mask)
 }
 
 fn create_arp_channel(
@@ -222,15 +218,10 @@ pub async fn ping_scan(interface_name: &str) -> Result<Vec<Device>> {
     let (source_ip, prefix_len) = get_network_info(&interface)
         .ok_or_else(|| NetworkError::InterfaceNotFound("No IPv4 on interface".to_string()))?;
 
-    let network_prefix = format!(
-        "{}.{}.{}",
-        source_ip.octets()[0],
-        source_ip.octets()[1],
-        source_ip.octets()[2]
-    );
-
     let netmask = prefix_to_netmask(prefix_len);
-    let ip_range = generate_network_range(&network_prefix, &netmask);
+    let mask_u32 = u32::from(netmask);
+    let network_ip = std::net::Ipv4Addr::from(u32::from(source_ip) & mask_u32);
+    let ip_range = generate_network_range(&network_ip.to_string(), &netmask.to_string());
 
     let mut join_set = JoinSet::new();
     let mut responded_ips: Vec<String> = Vec::new();
@@ -258,14 +249,27 @@ pub async fn ping_scan(interface_name: &str) -> Result<Vec<Device>> {
         }
     }
 
+    // Read the ARP table for MAC resolution
     let arp_table = read_arp_table().await?;
 
-    let devices: Vec<Device> = arp_table
+    // Build a device for every IP that responded to ping.
+    // Use the ARP table for MAC resolution; fall back to a placeholder so
+    // ping-only devices (not yet in ARP cache) are not silently dropped.
+    let devices: Vec<Device> = responded_ips
         .into_iter()
-        .map(|(ip, mac)| {
-            let vendor = mac_to_vendor(&mac).unwrap_or_else(|| "Unknown".to_string());
+        .map(|ip| {
+            let mac = arp_table
+                .get(&ip)
+                .cloned()
+                .unwrap_or_else(|| "00:00:00:00:00:00".to_string());
+
+            let vendor = if mac != "00:00:00:00:00:00" {
+                mac_to_vendor(&mac).unwrap_or_else(|| "Unknown".to_string())
+            } else {
+                "Unknown".to_string()
+            };
+
             let hostname = get_hostname(&ip);
-            
             let mut device = Device::new(&ip, &mac).with_vendor(vendor);
             if let Some(h) = hostname {
                 device = device.with_hostname(h);
