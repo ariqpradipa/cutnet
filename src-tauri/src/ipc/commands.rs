@@ -27,6 +27,27 @@ fn map_error(e: crate::network::types::NetworkError) -> ApiError {
     ApiError::from(e)
 }
 
+/// Returns true when the app was launched without admin/root privileges.
+/// In this mode any command that requires raw sockets should return a
+/// clear error rather than a cryptic "permission denied" from the OS.
+fn is_limited_mode() -> bool {
+    std::env::var("CUTNET_LIMITED_MODE").is_ok()
+}
+
+/// Short-circuit helper — returns an Err if running in limited mode.
+fn require_privileges() -> ApiResult<()> {
+    if is_limited_mode() {
+        return Err(ApiError::new(
+            crate::ipc::error::ErrorCode::PermissionDenied,
+            "This feature requires administrator/root privileges",
+        )
+        .with_action(
+            "Restart CutNet with sudo (Linux/macOS) or as Administrator (Windows)",
+        ));
+    }
+    Ok(())
+}
+
 /// Get all network interfaces available on the system
 #[tauri::command]
 pub async fn get_interfaces() -> ApiResult<Vec<NetworkInterface>> {
@@ -82,6 +103,7 @@ pub async fn start_arp_scan(
     killer: State<'_, KillerState>,
     app: AppHandle,
 ) -> ApiResult<()> {
+    require_privileges()?;
     log::info!("Starting ARP scan on interface: {}", interface_name);
 
     let mut scanner_lock = scanner.lock().await;
@@ -123,6 +145,7 @@ pub async fn start_ping_scan(
     killer: State<'_, KillerState>,
     app: AppHandle,
 ) -> ApiResult<()> {
+    require_privileges()?;
     log::info!("Starting ping scan on interface: {}", interface_name);
 
     let mut scanner_lock = scanner.lock().await;
@@ -176,6 +199,7 @@ pub async fn kill_device(
     killer: State<'_, KillerState>,
     app: AppHandle,
 ) -> ApiResult<()> {
+    require_privileges()?;
     log::info!("Killing device: {} ({})", ip, mac);
 
     let mut killer_lock = killer.lock().await;
@@ -453,6 +477,9 @@ async fn get_os_version() -> Result<String, String> {
 /// Start ARP Defender monitoring
 #[tauri::command]
 pub async fn start_defender(app: AppHandle) -> Result<(), String> {
+    if is_limited_mode() {
+        return Err("Administrator privileges required to start the ARP defender".into());
+    }
     let interface = crate::network::get_current_interface().map_err(|e| e.to_string())?;
     crate::network::defender::start_defender_monitoring(&interface.name, &app)
         .await
@@ -658,6 +685,9 @@ pub async fn start_forwarding(
     router_mac: String,
     interface_name: String,
 ) -> Result<(), String> {
+    if is_limited_mode() {
+        return Err("Administrator privileges required for packet forwarding".into());
+    }
     crate::network::start_forwarding(victim_mac, router_mac, interface_name)
         .await
         .map_err(|e| e.to_string())
